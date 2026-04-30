@@ -1,0 +1,20 @@
+#pragma once
+
+#include "dsp56kBase/buildconfig.h"
+
+namespace dsp56k
+{
+#ifdef DSP56K_AAR_TRANSLATE
+	constexpr bool g_useAARTranslate = true;
+#else
+	constexpr bool g_useAARTranslate = false;
+#endif
+
+#if defined(DSP56K_NO_JIT)
+	constexpr bool g_jitSupported = false;
+#elif defined(HAVE_X86_64) || defined(HAVE_ARM64)
+	constexpr bool g_jitSupported = true;
+#else
+	constexpr bool g_jitSupported = false;
+#endif
+}

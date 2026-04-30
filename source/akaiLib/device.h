@@ -1,0 +1,118 @@
+#pragma once
+
+#include "synthLib/device.h"
+
+#include <memory>
+#include <string>
+#include <vector>
+#include <mutex>
+
+namespace juce { class AudioFormatManager; class MemoryBlock; }
+
+namespace sfzero { class Synth; class Sound; class SF2Sound; class ZBPSound; }
+
+namespace akaiLib { class AkaiIsoReader; }
+
+namespace akaiLib
+{
+    class Device final : public synthLib::Device
+    {
+    public:
+        explicit Device(const synthLib::DeviceCreateParams& _params);
+        ~Device() override;
+
+        // ── synthLib::Device interface ────────────────────────────────────────
+        float getSamplerate() const override;
+        bool  setSamplerate(float _samplerate) override;
+        void  getSupportedSamplerates(std::vector<float>& _dst) const override;
+        bool  isValid() const override { return true; }
+
+        uint32_t getChannelCountIn()  override { return 0; }
+        uint32_t getChannelCountOut() override { return 2; }
+
+        bool setDspClockPercent(uint32_t) override { return true; }
+        uint32_t getDspClockPercent() const override { return 100; }
+        uint64_t getDspClockHz() const override { return 0; }
+
+#if SYNTHLIB_DEMO_MODE == 0
+        bool getState(std::vector<uint8_t>& _state, synthLib::StateType _type) override;
+        bool setState(const std::vector<uint8_t>& _state, synthLib::StateType _type) override;
+#endif
+
+        // ── Sound file loading ────────────────────────────────────────────────
+        // Load an SFZ, SF2, ZBP/ZBB, or WAV file as the current sound.
+        // Returns true on success. Thread-safe (locks internally).
+        bool loadSoundFile(const std::string& filePath);
+
+        // Load from in-memory data. fileName is used only for extension detection.
+        bool loadSoundFromMemory(juce::MemoryBlock&& data, const std::string& fileName);
+
+        // ── Preset/program support (SF2 / ZBP multi-preset files) ─────────────
+        int  getPresetCount() const;
+        std::string getPresetName(int index) const;
+        bool selectPreset(int index);
+        int  getSelectedPreset() const;
+
+        // ── Auto-slice (drum mapping) ────────────────────────────────────────
+        // Returns true if the current sound is a single audio file that can be sliced.
+        bool isSliceable() const;
+        // Re-create the sound with numSlices equal regions mapped to consecutive
+        // MIDI keys starting at 60 (C4). Returns true on success.
+        bool autoSlice(int numSlices);
+
+        // ── Akai ISO loading ────────────────────────────────────────────────
+        // Open an Akai ISO/BIN/CUE image. Scans partitions and discovers programs.
+        // Returns true on success. Call getIsoPresetCount()/selectIsoPreset() after.
+        bool loadIsoFile(const std::string& filePath);
+
+        // Number of programs found in the loaded ISO
+        int  getIsoPresetCount() const;
+        // Program display name: "A: ProgramName" etc.
+        std::string getIsoPresetName(int index) const;
+        // Load a specific program from the ISO into the SFZ engine
+        bool selectIsoPreset(int index);
+        // Is an ISO currently loaded?
+        bool isIsoLoaded() const { return m_isoReader != nullptr; }
+
+        // Currently loaded file path
+        const std::string& getLoadedFilePath() const { return m_filePath; }
+
+    protected:
+        void processAudio(const synthLib::TAudioInputs& _inputs,
+                          const synthLib::TAudioOutputs& _outputs,
+                          size_t _samples) override;
+
+        bool sendMidi(const synthLib::SMidiEvent& _ev,
+                      std::vector<synthLib::SMidiEvent>& _response) override;
+
+        void readMidiOut(std::vector<synthLib::SMidiEvent>& _midiOut) override {}
+
+    private:
+        float m_samplerate = 44100.0f;
+
+        std::unique_ptr<sfzero::Synth>   m_synth;
+        std::unique_ptr<juce::AudioFormatManager> m_formatManager;
+
+        // Mutex guards sound loading vs audio processing
+        std::mutex m_lock;
+
+        std::string m_filePath;
+
+        // For multi-preset files (SF2, ZBP)
+        int m_presetCount    = 0;
+        int m_selectedPreset = 0;
+
+        // For Akai ISO images
+        std::unique_ptr<AkaiIsoReader> m_isoReader;
+
+        // CC20 global tuning (cents, ±2400 range centered at CC value 64)
+    public:
+        int getTuneCents() const { return m_tuneCents; }
+        void setTuneCents(int cents) { m_tuneCents = cents; applyGlobalTranspose(); }
+    private:
+        int m_tuneCents = 0;
+        int m_lastPitchWheel[16] = { 8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192,
+                                     8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192 };
+        void applyGlobalTranspose();
+    };
+}

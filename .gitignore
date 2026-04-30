@@ -1,0 +1,32 @@
+# Build output
+Builds/
+Bin/
+build/
+
+# Xcode
+*.xcworkspace/
+xcuserdata/
+*.xccheckout
+*.moved-aside
+DerivedData/
+
+# Projucer-generated
+JuceLibraryCode/
+JuceLibraryCode-iOS/
+
+# Third-party JUCE modules (add manually, see README)
+Modules/
+
+# Assets and local patches (not distributed)
+Assets/
+patches/
+
+# Custom GUI (proprietary, not distributed)
+source/custom/
+
+# Local signing config
+Builds/iOS/Signing.local.xcconfig
+
+# macOS
+.DS_Store
+**/.DS_Store
