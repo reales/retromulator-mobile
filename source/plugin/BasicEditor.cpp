@@ -26,6 +26,17 @@ namespace retromulator
         folder.findChildFiles(out, juce::File::findFiles, recursive, "*.pfm");
     }
 
+    static void findBankFiles(SynthType type, const juce::File& folder,
+                              juce::Array<juce::File>& out, bool recursive = false)
+    {
+        if(type == SynthType::SID)
+        {
+            folder.findChildFiles(out, juce::File::findFiles, recursive, "*.sng");
+            folder.findChildFiles(out, juce::File::findFiles, recursive, "*.ins");
+        }
+        else findSysexFiles(folder, out, recursive);
+    }
+
     static juce::String normalisePath(const std::string& p)
     {
         if(p.empty()) return {};
@@ -319,7 +330,7 @@ namespace retromulator
             if(isAkaiSampler(type))
                 findSoundFiles(folder, files);
             else
-                findSysexFiles(folder, files);
+                findBankFiles(type, folder, files);
             files.sort();
 
             const int fileCount = files.size();
@@ -827,7 +838,7 @@ namespace retromulator
 
             const juce::File synthFolder2(HeadlessProcessor::getSynthDataFolder(type));
             juce::Array<juce::File> files;
-            findSysexFiles(synthFolder2, files);
+            findBankFiles(type, synthFolder2, files);
             files.sort();
             if(files.isEmpty()) return;
 
@@ -931,7 +942,7 @@ namespace retromulator
             else
             {
                 juce::Array<juce::File> files;
-                findSysexFiles(folder, files);
+                findBankFiles(type, folder, files);
                 files.sort();
                 if(!files.isEmpty())
                     self.m_proc.loadPresetFromFile(files[0].getFullPathName().toStdString(),
@@ -1041,7 +1052,7 @@ namespace retromulator
             else
             {
                 juce::Array<juce::File> files;
-                findSysexFiles(folder, files);
+                findBankFiles(newType, folder, files);
                 files.sort();
                 if(!files.isEmpty())
                     self.m_proc.loadPresetFromFile(files[0].getFullPathName().toStdString(),

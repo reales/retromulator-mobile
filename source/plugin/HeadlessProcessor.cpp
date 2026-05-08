@@ -33,6 +33,7 @@
 #include "akaiLib/device.h"
 #include "openWurliLib/device.h"
 #include "opl3Lib/device.h"
+#include "sidLib/device.h"
 
 #include <cstring>
 #include <fstream>
@@ -230,6 +231,7 @@ namespace retromulator
         case SynthType::AkaiS1000: return true; // No ROM needed
         case SynthType::OpenWurli: return true; // No ROM needed
         case SynthType::OPL3:      return true; // No ROM needed
+        case SynthType::SID:       return true; // No ROM needed
         default:                   return false;
         }
     }
@@ -702,6 +704,8 @@ namespace retromulator
                                           virusLib::DeviceModel::TI);
                 else if(type == SynthType::OPL3)
                     juce::File(getSynthDataFolder(SynthType::OPL3)).createDirectory();
+                else if(type == SynthType::SID)
+                    juce::File(getSynthDataFolder(SynthType::SID)).createDirectory();
             }
         }
 
@@ -710,7 +714,7 @@ namespace retromulator
         // Virus/other gearmulator cores use blocking waitNotEmpty — need 3 blocks on iOS.
         const bool isSynchronous = (type == SynthType::JE8086 || type == SynthType::AkaiS1000
                                  || type == SynthType::OpenWurli || type == SynthType::OPL3
-                                 || type == SynthType::None);
+                                 || type == SynthType::SID || type == SynthType::None);
         const bool isN2X = (type == SynthType::NordN2X);
         setLatencyBlocks(isSynchronous ? 0 : (isN2X ? 1 : 3));
 
@@ -826,6 +830,8 @@ namespace retromulator
                                           virusLib::DeviceModel::TI);
                 else if(type == SynthType::OPL3)
                     juce::File(getSynthDataFolder(SynthType::OPL3)).createDirectory();
+                else if(type == SynthType::SID)
+                    juce::File(getSynthDataFolder(SynthType::SID)).createDirectory();
             }
 
             fprintf(stderr, "[Boot] async: suspendProcessing(false)\n");
@@ -1226,7 +1232,20 @@ namespace retromulator
         }
 
         m_currentProgram = index;
-        sendBankMessage(index);
+
+        if(m_synthType == SynthType::SID)
+        {
+            if(auto* dev = getSidDevice())
+            {
+                dev->selectInstrument(index + 1);
+                m_patchName = dev->getCurrentPatchName();
+            }
+        }
+        else
+        {
+            sendBankMessage(index);
+        }
+
         updateHostDisplay(juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged(true));
         return true;
     }
@@ -1345,6 +1364,39 @@ namespace retromulator
             return true;
         }
 
+        // SID: .sng / .ins are multi-instrument banks loaded directly into the device.
+        if(m_synthType == SynthType::SID
+            && (hasSuffix(filePath, ".sng") || hasSuffix(filePath, ".ins")))
+        {
+            auto* dev = getSidDevice();
+            if(!dev) return false;
+
+            if(!dev->loadBankFile(filePath)) return false;
+
+            const int count = dev->getInstrumentCount();
+            m_programNames.clear();
+            m_programNames.reserve(static_cast<size_t>(count));
+            for(int i = 1; i <= count; ++i)
+                m_programNames.push_back(dev->getInstrumentName(i));
+
+            if(count > 0)
+                dev->selectInstrument(programIndex >= 0 && programIndex < count
+                                      ? programIndex + 1 : 1);
+
+            m_sysexFilePath  = filePath;
+            m_patchName      = patchName.empty()
+                ? (count > 0 ? dev->getCurrentPatchName() : std::string{})
+                : patchName;
+            m_sysexData.clear();
+            m_bankMessages.clear();
+            m_bankStride     = 1;
+            m_currentProgram = (count > 0) ? std::max(0, programIndex) : 0;
+
+            updateHostDisplay(juce::AudioProcessorListener::ChangeDetails()
+                .withNonParameterStateChanged(true));
+            return true;
+        }
+
         std::ifstream f(filePath, std::ios::binary);
         if(!f.is_open())
         {
@@ -1396,6 +1448,13 @@ namespace retromulator
         if(m_synthType != SynthType::OPL3)
             return nullptr;
         return dynamic_cast<opl3Lib::Device*>(m_device.get());
+    }
+
+    sidLib::Device* HeadlessProcessor::getSidDevice() const
+    {
+        if(m_synthType != SynthType::SID)
+            return nullptr;
+        return dynamic_cast<sidLib::Device*>(m_device.get());
     }
 
     bool HeadlessProcessor::loadSoundFile(const std::string& filePath)
@@ -1915,6 +1974,13 @@ namespace retromulator
             // Akai: reload from the original file path.
             // ISO mode is determined below after reading extended state slots.
             // For now, just store the path — we reload after reading slots.
+        }
+        else if(newType == SynthType::SID)
+        {
+            if(!sysexFilePath.empty() && juce::File(sysexFilePath).existsAsFile())
+                loadPresetFromFile(sysexFilePath, patchName, static_cast<int>(savedProgram));
+            else
+                m_sysexFilePath = sysexFilePath;
         }
         else
         {

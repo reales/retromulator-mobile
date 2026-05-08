@@ -18,6 +18,7 @@
 namespace akaiLib { class Device; }
 namespace openWurliLib { class Device; }
 namespace opl3Lib { class Device; }
+namespace sidLib { class Device; }
 
 namespace retromulator
 {
@@ -84,11 +85,17 @@ namespace retromulator
         akaiLib::Device* getAkaiDevice() const;
         openWurliLib::Device* getOpenWurliDevice() const;
         opl3Lib::Device* getOpl3Device() const;
+        sidLib::Device* getSidDevice() const;
 
         // ── Program bank accessors ──────────────────────────────────────────
         // m_bankStride: number of raw sysex messages per logical program (1 for most
         // synths; >1 for JE-8086 where each performance = several sub-messages).
-        int getProgramCount()   const { return static_cast<int>(m_bankMessages.size()) / m_bankStride; }
+        int getProgramCount()   const
+        {
+            if(m_bankMessages.empty() && !m_programNames.empty())
+                return static_cast<int>(m_programNames.size());
+            return static_cast<int>(m_bankMessages.size()) / m_bankStride;
+        }
         int getCurrentProgram() override { return m_currentProgram; }
 
         // ── Data folder helpers ─────────────────────────────────────────────
