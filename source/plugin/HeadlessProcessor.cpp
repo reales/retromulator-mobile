@@ -27,7 +27,9 @@
 #include "dx7Lib/romloader.h"
 #include "virusLib/deviceModel.h"
 #include "virusLib/microcontrollerTypes.h"
+#ifdef CUSTOM
 #include "virusLib/presetConverter.h"
+#endif
 #include "synthLib/romLoader.h"
 
 #include "akaiLib/device.h"
@@ -38,10 +40,6 @@
 #include <cstring>
 #include <fstream>
 #include <sys/stat.h>
-
-#ifdef __APPLE__
-#include <TargetConditionals.h>
-#endif
 
 #ifdef _WIN32
 #  include <direct.h>
@@ -73,16 +71,6 @@ namespace retromulator
         const char* docs = std::getenv("USERPROFILE");
         if(!docs) docs = "";
         return std::string(docs) + "\\Documents\\discoDSP\\Retromulator\\";
-#elif JUCE_IOS
-        // On iOS both the Standalone app and the AUv3 extension must share the same
-        // data folder so ROM and sysex files are visible to both.  App Groups provide
-        // a container that is accessible from every target in the same group.
-        // The group ID must match iosAppGroupsId in the Projucer exporter AND the
-        // provisioning profile in the Apple Developer Portal.
-        static std::string cached;
-        if (cached.empty())
-            cached = getIOSSharedDataFolder();
-        return cached;
 #elif defined(__APPLE__)
         const char* home = std::getenv("HOME");
         if(!home) home = "";
@@ -136,32 +124,6 @@ namespace retromulator
             xml = std::make_unique<juce::XmlElement>("RetromulatorSettings");
 
         xml->setAttribute(makeSettingsKey(type), juce::String(folder));
-        xml->writeTo(file);
-    }
-
-    bool HeadlessProcessor::isJitlessCoresEnabled()
-    {
-       #if TARGET_OS_IPHONE
-        constexpr bool kDefault = true;   // iOS: hide JIT cores by default
-       #else
-        constexpr bool kDefault = false;
-       #endif
-        const auto file = getSettingsFile();
-        if(!file.existsAsFile()) return kDefault;
-        if(const auto xml = juce::XmlDocument::parse(file))
-            return xml->getBoolAttribute("jitlessCoresEnabled", kDefault);
-        return kDefault;
-    }
-
-    void HeadlessProcessor::setJitlessCoresEnabled(bool enabled)
-    {
-        const auto file = getSettingsFile();
-        std::unique_ptr<juce::XmlElement> xml;
-        if(file.existsAsFile())
-            xml = juce::XmlDocument::parse(file);
-        if(!xml)
-            xml = std::make_unique<juce::XmlElement>("RetromulatorSettings");
-        xml->setAttribute("jitlessCoresEnabled", enabled);
         xml->writeTo(file);
     }
 
@@ -229,9 +191,6 @@ namespace retromulator
         case SynthType::JE8086:   return jeLib::RomLoader::findROM().isValid();
         case SynthType::DX7:       return dx7Emu::RomLoader::findROM().isValid();
         case SynthType::AkaiS1000: return true; // No ROM needed
-        case SynthType::OpenWurli: return true; // No ROM needed
-        case SynthType::OPL3:      return true; // No ROM needed
-        case SynthType::SID:       return true; // No ROM needed
         default:                   return false;
         }
     }
@@ -241,69 +200,6 @@ namespace retromulator
         synthLib::RomLoader::addSearchPath(path);
     }
     // ── End GPL boundary helpers ─────────────────────────────────────────────
-
-    // Extract bundled OPL3 SBI presets from Archive.zip in the app bundle into
-    // the writable App Group data folder. Skips files that already exist so
-    // user edits are not overwritten.
-    void HeadlessProcessor::installBundledOPL3()
-    {
-        const juce::File destRoot(getSynthDataFolder(SynthType::OPL3));
-        destRoot.createDirectory();
-
-        // Skip if already installed (sentinel file marks completion)
-        const juce::File sentinel = destRoot.getChildFile(".installed");
-        if(sentinel.exists())
-            return;
-
-        const juce::File archiveFile =
-            juce::File::getSpecialLocation(juce::File::currentApplicationFile)
-#if JUCE_IOS
-                .getChildFile("OPL3/Archive.zip");
-#else
-                .getChildFile("Contents/Resources/OPL3/Archive.zip");
-#endif
-
-        if(!archiveFile.existsAsFile())
-            return;
-
-        juce::ZipFile zip(archiveFile);
-        if(zip.getNumEntries() == 0)
-            return;
-
-        for(int i = 0; i < zip.getNumEntries(); ++i)
-        {
-            const auto* entry = zip.getEntry(i);
-            if(!entry)
-                continue;
-
-            const juce::File dest = destRoot.getChildFile(entry->filename);
-
-            // Directory entries end with '/' — just create the folder
-            if(entry->filename.endsWithChar('/'))
-            {
-                dest.createDirectory();
-                continue;
-            }
-
-            // Skip files that already exist (preserve user edits)
-            if(dest.exists())
-                continue;
-
-            // Ensure parent directory exists
-            dest.getParentDirectory().createDirectory();
-
-            // Extract file
-            std::unique_ptr<juce::InputStream> stream(zip.createStreamForEntry(i));
-            if(stream)
-            {
-                juce::FileOutputStream out(dest);
-                if(out.openedOk())
-                    out.writeFromInputStream(*stream, -1);
-            }
-        }
-
-        sentinel.create();
-    }
 
     std::string HeadlessProcessor::copySysexToDataFolder(const std::string& sourcePath)
     {
@@ -597,30 +493,7 @@ namespace retromulator
                 {}                // binaryData (no embedded resources)
             })
     {
-#if JUCE_IOS
-        // Must be called before any DSP device is created. iOS sandboxing blocks
-        // shm_open, so the DSP56300 MemoryBuffer needs a writable temp directory
-        // for its file-backed mmap fallback.
-        initIOSTempPath();
-
-        // Request a 512-sample buffer from the iOS audio session.
-        // The default 128 is too small for the DSP interpreter.
-        setIOSPreferredBufferSize(1024);
-
-        // Symlink Documents/Retromulator → App Group container so
-        // iTunes/Finder File Sharing sees the shared data folder.
-        linkDocumentsToSharedFolder();
-#endif
-
         getController();
-
-        // Seed the ROM search path with the shared data folder so all loaders
-        // can find firmware files placed there by either the standalone app or
-        // an AUv3 extension (both share the same App Group container on iOS).
-        addRomSearchPath(getDataFolder() + "ROM/");
-
-        // Copy bundled OPL3 .sbi presets to writable data folder on first run.
-        installBundledOPL3();
 
         // Pre-initialize m_plugin with a silent DummyDevice so that prepareToPlay
         // never triggers getPlugin()'s lazy-init, which would call createDevice(),
@@ -631,25 +504,14 @@ namespace retromulator
         m_plugin.reset(new synthLib::Plugin(m_device.get(), {}));
 
         loadEditorSizeFromSettings();
-
-        m_keyboardState.addListener(this);
     }
 
     HeadlessProcessor::~HeadlessProcessor()
     {
-        m_keyboardState.removeListener(this);
-
         if(m_savedEditorWidth > 0 && m_savedEditorHeight > 0)
             saveEditorSizeToSettings(m_savedEditorWidth, m_savedEditorHeight);
 
         suspendProcessing(true);
-    }
-
-    void HeadlessProcessor::joinBootThread()
-    {
-        if(m_bootThread && m_bootThread->joinable())
-            m_bootThread->join();
-        m_bootThread.reset();
     }
 
     // ── Synth hot-swap ────────────────────────────────────────────────────────
@@ -709,143 +571,13 @@ namespace retromulator
             }
         }
 
-        // Synchronous cores need 0 extra blocks.
-        // N2X has its own timeout-based wait — 1 block on iOS.
-        // Virus/other gearmulator cores use blocking waitNotEmpty — need 3 blocks on iOS.
-        const bool isSynchronous = (type == SynthType::JE8086 || type == SynthType::AkaiS1000
-                                 || type == SynthType::OpenWurli || type == SynthType::OPL3
-                                 || type == SynthType::SID || type == SynthType::None);
-        const bool isN2X = (type == SynthType::NordN2X);
-        setLatencyBlocks(isSynchronous ? 0 : (isN2X ? 1 : 3));
+        // JE-8086, Akai, OpenWurli, OPL3, SID run synchronously — no extra latency block needed.
+        setLatencyBlocks((type == SynthType::JE8086 || type == SynthType::AkaiS1000
+                       || type == SynthType::OpenWurli || type == SynthType::OPL3
+                       || type == SynthType::SID) ? 0 : 1);
 
         suspendProcessing(false);
         updateHostDisplay(juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged(true));
-    }
-
-    void HeadlessProcessor::setSynthTypeAsync(SynthType type, const std::string& romPath,
-                                              std::function<void()> onComplete)
-    {
-        // Wait for any previous async boot to finish.
-        joinBootThread();
-
-        if(type == SynthType::None)
-        {
-            // SynthType::None is instant — no need for a background thread.
-            setSynthType(type, romPath);
-            if(onComplete)
-                onComplete();
-            return;
-        }
-
-        // ── Prepare state on the calling (GUI) thread ────────────────────────
-        m_isBooting.store(true);
-        m_synthType   = type;
-        m_romPath     = romPath;
-        m_deviceError = synthLib::DeviceError::None;
-        m_deviceBooted = false;
-        m_pendingResend.store(false);
-        m_resendBlocksRemaining = 0;
-
-        m_sysexFilePath.clear();
-        m_patchName.clear();
-        m_sysexData.clear();
-        m_bankMessages.clear();
-        m_programNames.clear();
-        m_currentProgram = 0;
-        m_bankStride     = 1;
-
-        suspendProcessing(true);
-
-        // Detach the old device from Plugin without deleting it — device destructors
-        // join DSP threads which can block for a long time. We'll delete on the boot thread.
-        getPlugin().releaseDevice();
-        std::unique_ptr<synthLib::Device> oldDevice(m_device.release());
-
-        // Install a DummyDevice so the audio callback has something safe while booting.
-        auto* dummy = new pluginLib::DummyDevice({});
-        getPlugin().setDevice(dummy);
-        m_device.reset(dummy);
-
-        suspendProcessing(false);
-
-        // Delete old device on a fire-and-forget thread — its DSP thread join
-        // can block for a long time and must not delay the new device boot.
-        auto oldDeviceReady = std::make_shared<std::atomic<bool>>(false);
-        if(oldDevice)
-        {
-            std::thread([dev = std::move(oldDevice), ready = oldDeviceReady]() mutable {
-                fprintf(stderr, "[Boot] destroying old device...\n");
-                dev.reset();
-                fprintf(stderr, "[Boot] old device destroyed\n");
-                ready->store(true);
-            }).detach();
-        }
-        else
-        {
-            oldDeviceReady->store(true);
-        }
-
-        // ── Boot on a background thread ──────────────────────────────────────
-        m_bootThread = std::make_unique<std::thread>([this, type, romPath,
-                                                      oldDeviceReady,
-                                                      onComplete = std::move(onComplete)]()
-        {
-            // Wait for old device destruction to finish before allocating new
-            // DSP resources — MemoryBuffer temp files must not overlap.
-            // Timeout after 5 seconds to avoid hanging if the old DSP thread is stuck.
-            for(int i = 0; i < 500 && !oldDeviceReady->load(); ++i)
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            if(!oldDeviceReady->load())
-                fprintf(stderr, "[Boot] WARNING: old device destruction timed out, proceeding anyway\n");
-
-            fprintf(stderr, "[Boot] async: suspendProcessing(true)\n");
-            suspendProcessing(true);
-
-            fprintf(stderr, "[Boot] async: rebootDevice for type %d\n", static_cast<int>(type));
-            bool ok = rebootDevice();
-            fprintf(stderr, "[Boot] async: rebootDevice returned %d\n", ok);
-
-            // Set latency blocks AFTER rebootDevice so the new device's
-            // samplerate is used for the latency calculation.
-            {
-                const bool isSynchronous = (type == SynthType::JE8086 || type == SynthType::AkaiS1000
-                                         || type == SynthType::OpenWurli || type == SynthType::OPL3
-                                         || type == SynthType::None);
-                const bool isN2X = (type == SynthType::NordN2X);
-                setLatencyBlocks(isSynchronous ? 0 : (isN2X ? 1 : 3));
-            }
-            if(!ok)
-                m_deviceError = synthLib::DeviceError::FirmwareMissing;
-
-            if(m_deviceError == synthLib::DeviceError::None)
-            {
-                fprintf(stderr, "[Boot] async: extracting presets\n");
-                if(type == SynthType::JE8086)
-                    extractRomPresets(getSynthDataFolder(SynthType::JE8086));
-                else if(type == SynthType::VirusABC)
-                    extractVirusRomPresets(getSynthDataFolder(SynthType::VirusABC),
-                                          virusLib::DeviceModel::ABC);
-                else if(type == SynthType::VirusTI)
-                    extractVirusRomPresets(getSynthDataFolder(SynthType::VirusTI),
-                                          virusLib::DeviceModel::TI);
-                else if(type == SynthType::OPL3)
-                    juce::File(getSynthDataFolder(SynthType::OPL3)).createDirectory();
-                else if(type == SynthType::SID)
-                    juce::File(getSynthDataFolder(SynthType::SID)).createDirectory();
-            }
-
-            fprintf(stderr, "[Boot] async: suspendProcessing(false)\n");
-            suspendProcessing(false);
-            m_isBooting.store(false);
-
-            // Notify the message thread that boot is complete.
-            juce::MessageManager::callAsync([this, onComplete]()
-            {
-                updateHostDisplay(juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged(true));
-                if(onComplete)
-                    onComplete();
-            });
-        });
     }
 
     // ── Patch name extraction ─────────────────────────────────────────────────
@@ -1221,23 +953,14 @@ namespace retromulator
         if(index < 0 || index >= getProgramCount())
             return false;
 
-        // Akai S1000: preset switching is handled by the SFZero subsound system,
-        // not by sysex bank messages. Route to the correct selector.
-        if(m_synthType == SynthType::AkaiS1000)
-        {
-            if(m_akaiIsoMode)
-                return selectAkaiIsoPreset(index);
-            else
-                return selectSoundPreset(index);
-        }
-
         m_currentProgram = index;
 
+        // SID: route to the device's instrument selector; no sysex bank involved.
         if(m_synthType == SynthType::SID)
         {
             if(auto* dev = getSidDevice())
             {
-                dev->selectInstrument(index + 1);
+                dev->selectInstrument(index + 1); // 1-based on the device side
                 m_patchName = dev->getCurrentPatchName();
             }
         }
@@ -1364,9 +1087,9 @@ namespace retromulator
             return true;
         }
 
-        // SID: .sng / .ins are multi-instrument banks loaded directly into the device.
+        // SID: .sng / .ins / .sid are multi-instrument banks loaded directly into the device.
         if(m_synthType == SynthType::SID
-            && (hasSuffix(filePath, ".sng") || hasSuffix(filePath, ".ins")))
+            && (hasSuffix(filePath, ".sng") || hasSuffix(filePath, ".ins") || hasSuffix(filePath, ".sid")))
         {
             auto* dev = getSidDevice();
             if(!dev) return false;
@@ -1379,6 +1102,7 @@ namespace retromulator
             for(int i = 1; i <= count; ++i)
                 m_programNames.push_back(dev->getInstrumentName(i));
 
+            // Auto-select first instrument
             if(count > 0)
                 dev->selectInstrument(programIndex >= 0 && programIndex < count
                                       ? programIndex + 1 : 1);
@@ -1467,7 +1191,7 @@ namespace retromulator
             return false;
 
         m_sysexFilePath = filePath;
-        m_patchName     = juce::URL::removeEscapeChars(juce::File(filePath).getFileNameWithoutExtension()).toStdString();
+        m_patchName     = juce::File(filePath).getFileNameWithoutExtension().toStdString();
         m_sysexData.clear();
         m_bankMessages.clear();
         m_bankStride = 1;
@@ -1483,54 +1207,10 @@ namespace retromulator
             for(int i = 0; i < presetCount; ++i)
                 m_programNames[static_cast<size_t>(i)] = dev->getPresetName(i);
             m_bankMessages.resize(static_cast<size_t>(presetCount));
-            // Show first preset name immediately rather than the filename
-            if(!m_programNames.empty() && !m_programNames[0].empty())
-                m_patchName = m_programNames[0];
         }
         else
         {
             // Single-file sound (SFZ/WAV): one program entry with filename as name
-            m_programNames = { m_patchName };
-            m_bankMessages.resize(1);
-        }
-        m_currentProgram = 0;
-
-        updateHostDisplay(juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged(true));
-        return true;
-    }
-
-    bool HeadlessProcessor::loadSoundFromMemory(juce::MemoryBlock&& data, const std::string& fileName)
-    {
-        auto* dev = getAkaiDevice();
-        if(!dev)
-            return false;
-
-        const std::string name = juce::URL::removeEscapeChars(juce::File(fileName).getFileName()).toStdString();
-
-        if(!dev->loadSoundFromMemory(std::move(data), name))
-            return false;
-
-        m_sysexFilePath  = name;
-        m_patchName      = juce::File(name).getFileNameWithoutExtension().toStdString();
-        m_sysexData.clear();
-        m_bankMessages.clear();
-        m_bankStride     = 1;
-        m_akaiIsoMode    = false;
-        m_akaiIsoPath.clear();
-        m_akaiSliceCount = 0;
-
-        const int presetCount = dev->getPresetCount();
-        if(presetCount > 0)
-        {
-            m_programNames.resize(static_cast<size_t>(presetCount));
-            for(int i = 0; i < presetCount; ++i)
-                m_programNames[static_cast<size_t>(i)] = dev->getPresetName(i);
-            m_bankMessages.resize(static_cast<size_t>(presetCount));
-            if(!m_programNames.empty() && !m_programNames[0].empty())
-                m_patchName = m_programNames[0];
-        }
-        else
-        {
             m_programNames = { m_patchName };
             m_bankMessages.resize(1);
         }
@@ -1602,27 +1282,6 @@ namespace retromulator
         m_currentProgram = index;
         if(index >= 0 && index < static_cast<int>(m_programNames.size()))
             m_patchName = m_programNames[static_cast<size_t>(index)];
-
-        updateHostDisplay(juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged(true));
-        return true;
-    }
-
-    bool HeadlessProcessor::applyAkaiAutoSlice(int count)
-    {
-        auto* dev = getAkaiDevice();
-        if(!dev || !dev->autoSlice(count))
-            return false;
-
-        m_akaiSliceCount = count;
-
-        // Rebuild program list: one entry per slice, named "Slice 1".."Slice N"
-        m_programNames.resize(static_cast<size_t>(count));
-        m_bankMessages.resize(static_cast<size_t>(count));
-        for(int i = 0; i < count; ++i)
-            m_programNames[static_cast<size_t>(i)] = "Slice " + std::to_string(i + 1);
-
-        m_currentProgram = 0;
-        m_patchName = m_programNames[0];
 
         updateHostDisplay(juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged(true));
         return true;
@@ -1706,6 +1365,7 @@ namespace retromulator
 
     int HeadlessProcessor::exportConvertedVirusBank(const std::string& destPath, char targetVersion) const
     {
+#ifdef CUSTOM
         if(m_bankMessages.empty())
             return -1;
 
@@ -1735,47 +1395,10 @@ namespace retromulator
                     static_cast<std::streamsize>(msg.size()));
 
         return f.good() ? converted : -1;
-    }
-
-    // ── Mirror incoming pitch bend / CC1 to atomics so the editor can animate wheels ──
-
-    void HeadlessProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
-    {
-        for (const auto meta : midi)
-        {
-            const auto m = meta.getMessage();
-            if (m.isPitchWheel())
-            {
-                m_incomingPitchBend.store(m.getPitchWheelValue(), std::memory_order_relaxed);
-                m_pitchBendSeq.fetch_add(1, std::memory_order_relaxed);
-            }
-            else if (m.isController() && m.getControllerNumber() == 1)
-            {
-                m_incomingModWheel.store(m.getControllerValue(), std::memory_order_relaxed);
-                m_modWheelSeq.fetch_add(1, std::memory_order_relaxed);
-            }
-        }
-        Processor::processBlock(buffer, midi);
-    }
-
-    // ── Virtual keyboard listener — routes on-screen key presses to the synth ───
-
-    void HeadlessProcessor::handleNoteOn(juce::MidiKeyboardState*, int midiChannel, int midiNoteNumber, float velocity)
-    {
-        synthLib::SMidiEvent ev(synthLib::MidiEventSource::Editor);
-        ev.a = static_cast<uint8_t>(0x90 | ((midiChannel - 1) & 0x0f));
-        ev.b = static_cast<uint8_t>(midiNoteNumber);
-        ev.c = static_cast<uint8_t>(juce::jlimit(1, 127, static_cast<int>(velocity * 127.f)));
-        addMidiEvent(ev);
-    }
-
-    void HeadlessProcessor::handleNoteOff(juce::MidiKeyboardState*, int midiChannel, int midiNoteNumber, float /*velocity*/)
-    {
-        synthLib::SMidiEvent ev(synthLib::MidiEventSource::Editor);
-        ev.a = static_cast<uint8_t>(0x80 | ((midiChannel - 1) & 0x0f));
-        ev.b = static_cast<uint8_t>(midiNoteNumber);
-        ev.c = 0;
-        addMidiEvent(ev);
+#else
+        (void)destPath; (void)targetVersion;
+        return -1;
+#endif
     }
 
     // ── processBpm (deferred resend: pre-audio guard + JE-8086 boot delay) ──────
@@ -1977,10 +1600,12 @@ namespace retromulator
         }
         else if(newType == SynthType::SID)
         {
+            // SID: bank lives in the .sng/.ins/.sid file (no embedded sysex).
+            // Reload it and select the saved instrument.
             if(!sysexFilePath.empty() && juce::File(sysexFilePath).existsAsFile())
                 loadPresetFromFile(sysexFilePath, patchName, static_cast<int>(savedProgram));
             else
-                m_sysexFilePath = sysexFilePath;
+                m_sysexFilePath = sysexFilePath; // path lost; keep for display
         }
         else
         {
