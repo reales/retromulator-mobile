@@ -33,6 +33,7 @@ namespace retromulator
         {
             folder.findChildFiles(out, juce::File::findFiles, recursive, "*.sng");
             folder.findChildFiles(out, juce::File::findFiles, recursive, "*.ins");
+            folder.findChildFiles(out, juce::File::findFiles, recursive, "*.sid");
         }
         else findSysexFiles(folder, out, recursive);
     }
@@ -550,9 +551,10 @@ namespace retromulator
         const auto lastFolder = HeadlessProcessor::getLastLoadFolder(type);
         const auto destFolder = lastFolder.empty() ? synthFolder : juce::File(lastFolder);
 
-        const juce::String filter = isAkaiSampler(type)
-            ? juce::String(kSoundFilePattern)
-            : juce::String("*.syx;*.mid;*.bin;*.pfm");
+        const juce::String filter =
+              isAkaiSampler(type)        ? juce::String(kSoundFilePattern)
+            : type == SynthType::SID     ? juce::String("*.sng;*.ins;*.sid")
+                                          : juce::String("*.syx;*.mid;*.bin;*.pfm");
 
         const juce::String title = isAkaiSampler(type)
             ? "Select SFZ, SF2, ZBP, ZBB, WAV, AIF, FLAC or OGG sound file"
@@ -630,8 +632,22 @@ namespace retromulator
                         }
                     }
 
-                    safe->m_proc.loadPresetFromFile(dest.getFullPathName().toStdString(),
-                                                    dest.getFileNameWithoutExtension().toStdString());
+                    const bool loaded = safe->m_proc.loadPresetFromFile(
+                        dest.getFullPathName().toStdString(),
+                        dest.getFileNameWithoutExtension().toStdString());
+
+                    // Only GoatTracker-packed PSIDs parse; drop the copy if not.
+                    if(!loaded && synthType == SynthType::SID && dest.hasFileExtension("sid"))
+                    {
+                        dest.deleteFile();
+                        juce::NativeMessageBox::showMessageBoxAsync(
+                            juce::MessageBoxIconType::WarningIcon,
+                            "Unsupported .sid File",
+                            "This .sid file is not a GoatTracker-packed PSID and "
+                            "cannot be imported as a SID instrument bank.\n\n"
+                            "Only .sid files produced by GoatTracker 2's \"Pack\" "
+                            "exporter are supported.");
+                    }
                     safe->updateStatus();
                 });
         });
