@@ -35,6 +35,15 @@ namespace retromulator
             folder.findChildFiles(out, juce::File::findFiles, recursive, "*.ins");
             folder.findChildFiles(out, juce::File::findFiles, recursive, "*.sid");
         }
+        else if(type == SynthType::Ayumi)
+        {
+            // Presets live in the Factory/User subfolders — always search into them.
+            folder.findChildFiles(out, juce::File::findFiles, true, "*.ay");
+        }
+        else if(type == SynthType::OPL3)
+        {
+            folder.findChildFiles(out, juce::File::findFiles, true, "*.sbi");
+        }
         else findSysexFiles(folder, out, recursive);
     }
 
@@ -554,6 +563,8 @@ namespace retromulator
         const juce::String filter =
               isAkaiSampler(type)        ? juce::String(kSoundFilePattern)
             : type == SynthType::SID     ? juce::String("*.sng;*.ins;*.sid")
+            : type == SynthType::Ayumi   ? juce::String("*.ay")
+            : type == SynthType::OPL3    ? juce::String("*.sbi")
                                           : juce::String("*.syx;*.mid;*.bin;*.pfm");
 
         const juce::String title = isAkaiSampler(type)

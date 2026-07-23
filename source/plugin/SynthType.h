@@ -20,6 +20,7 @@ namespace retromulator
         OpenWurli = 8,  // Wurlitzer 200A (OpenWurli physical model)
         OPL3      = 9,  // Yamaha OPL3 / YMF262 (Nuked OPL3)
         SID       = 10, // Commodore 64 SID 6581/8580 (reSID)
+        Ayumi     = 11, // AY-3-8910 / YM2149 PSG (Ayumi + Ym2149Synth voice engine)
 
         Count
     };
@@ -54,6 +55,7 @@ namespace retromulator
     {
         static const SynthType order[] = {
             SynthType::AkaiS1000,
+            SynthType::Ayumi,
             SynthType::DX7,
            #if !TARGET_OS_IPHONE
             SynthType::JE8086,
@@ -88,6 +90,7 @@ namespace retromulator
             case SynthType::OpenWurli: return "OpenWurli";
             case SynthType::OPL3:      return "OPL3";
             case SynthType::SID:       return "SID";
+            case SynthType::Ayumi:     return "Ayumi";
             default:                   return "None";
         }
     }
