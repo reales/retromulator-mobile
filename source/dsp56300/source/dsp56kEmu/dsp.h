@@ -30,7 +30,11 @@ namespace dsp56k
 	class DSP;
 	
 	using TInstructionFunc = void (DSP::*)(TWord _op);
-	
+
+	// plain function pointer used for dispatch. Avoids the pointer-to-member
+	// representation (2 words + virtual check) on the hot path.
+	using TInstructionFuncFlat = void (*)(DSP*, TWord _op);
+
 	template<typename Ta, typename Tb> void dspExecPeripherals(DSP* _dsp) noexcept;
 
 	static constexpr bool g_useJIT = g_jitSupported;
@@ -118,15 +122,25 @@ namespace dsp56k
 
 		Opcodes							m_opcodes;
 
+		// hot dispatch entry, 16 bytes. Holds the prefetched opcode words so the
+		// exec loop does not have to re-read P memory once the entry is resolved.
 		struct OpcodeCacheEntry
 		{
-			TInstructionFunc op;
-			TInstructionFunc opMove;
-			TInstructionFunc opAlu;
+			TInstructionFuncFlat op;
+			TWord opWordA;
+			TWord opWordB;
 		};
 
-		std::vector<OpcodeCacheEntry>	m_opcodeCache;
-		
+		// cold, only used by parallel move+alu and IFcc
+		struct OpcodeCacheParallel
+		{
+			TInstructionFuncFlat opMove;
+			TInstructionFuncFlat opAlu;
+		};
+
+		std::vector<OpcodeCacheEntry>		m_opcodeCache;
+		std::vector<OpcodeCacheParallel>	m_opcodeCacheParallel;
+
 		InstructionCache				cache;
 
 		// used to monitor ALL register changes during exec
@@ -192,12 +206,11 @@ namespace dsp56k
 					m_debugger->onExec(getPC().var);
 #endif
 
-				pcCurrentInstruction = reg.pc.toWord();
+				const auto pc = reg.pc.toWord();
+				pcCurrentInstruction = pc;
 
-				const auto op = fetchPC();
-
-				execOp(op);
-			}			
+				execOp(pc);
+			}
 		}
 
 		template<typename Ta, typename Tb> void execPeriph() noexcept
@@ -350,20 +363,15 @@ namespace dsp56k
 			return m_opWordB;
 		}
 
-		// -- execution 
-		TWord fetchPC()
-		{
-			TWord ret;
-			memReadOpcode(reg.pc.toWord(), ret, m_opWordB );
-			++reg.pc.var;
-			return ret;
-		}
+		// -- execution
+		void 	execOp							(TWord _pc);
 
-		void 	execOp							(TWord op);
+		void	exec_jump						(TInstructionFuncFlat _func, TWord _op)		{ _func(this, _op); }
 
-		void	exec_jump						(const TInstructionFunc& _func, TWord _op);
-		
-		bool	exec_parallel					(const TInstructionFunc& _instMove, const TInstructionFunc& _instAlu, TWord _op);
+		bool	exec_parallel					(TInstructionFuncFlat _instMove, TInstructionFuncFlat _instAlu, TWord _op);
+
+		// fills the cache entry for _pc by decoding the opcode at that address
+		void	resolveCacheEntry				(TWord _pc);
 
 		bool	do_exec							( TWord _loopcount, TWord _addr );
 		bool	do_end							();
@@ -1035,11 +1043,10 @@ namespace dsp56k
 		void op_Tst(TWord op);
 		void op_Vsl(TWord op);
 		void op_Wait(TWord _op);
-		void op_ResolveCache(TWord op);
 		void op_Parallel(TWord op);
 
 		// ------------- function permutations -------------
-		static TInstructionFunc resolvePermutation(Instruction _inst, TWord _op);
+		static TInstructionFuncFlat resolvePermutation(Instruction _inst, TWord _op);
 
 		// ------------- operation helper methods -------------
 
@@ -1173,4 +1180,15 @@ namespace dsp56k
 		void coreDump(std::stringstream& _dst);
 		void coreDump();
 	};
+
+	template<TInstructionFunc F> void instructionThunk(DSP* _dsp, const TWord _op)
+	{
+		(_dsp->*F)(_op);
+	}
+
+	template<TInstructionFunc F> constexpr TInstructionFuncFlat flatten() noexcept
+	{
+		// entries resolved via permutation are null in the jump table, keep them null
+		return F != nullptr ? &instructionThunk<F> : nullptr;
+	}
 }
