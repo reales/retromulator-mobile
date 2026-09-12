@@ -24,13 +24,13 @@
                   iosBackgroundAudio="1" iosBackgroundBle="1" iCloudPermissions="1"
                   iosBluetoothPermissionNeeded="1" iosAppGroups="1">
       <CONFIGURATIONS>
-        <CONFIGURATION name="Debug" isDebug="1" targetName="Retromulator" iosCompatibility="14.0"
+        <CONFIGURATION name="Debug" isDebug="1" targetName="Retromulator" iosCompatibility="15.0"
                        headerPath="../../source&#10;../../source/plugin&#10;../../source/bridge&#10;../../source/ronaldo&#10;../../source/JUCE/modules&#10;../../source/dsp56300/source&#10;../../source/dsp56300/source/dsp56kBase&#10;../../source/dsp56300/source/dsp56kEmu&#10;../../source/dsp56300/source/asmjit/src&#10;../../source/mc68k&#10;../../source/mc68k/Musashi&#10;../../source/mc68k/Musashi/softfloat&#10;../../JuceLibraryCode-iOS"
-                       binaryPath="Bin/iOS/Debug" iosDeploymentTarget="14.0"/>
-        <CONFIGURATION name="Release" isDebug="0" targetName="Retromulator" iosCompatibility="14.0"
+                       binaryPath="Bin/iOS/Debug" iosDeploymentTarget="15.0"/>
+        <CONFIGURATION name="Release" isDebug="0" targetName="Retromulator" iosCompatibility="15.0"
                        headerPath="../../source&#10;../../source/plugin&#10;../../source/bridge&#10;../../source/ronaldo&#10;../../source/JUCE/modules&#10;../../source/dsp56300/source&#10;../../source/dsp56300/source/dsp56kBase&#10;../../source/dsp56300/source/dsp56kEmu&#10;../../source/dsp56300/source/asmjit/src&#10;../../source/mc68k&#10;../../source/mc68k/Musashi&#10;../../source/mc68k/Musashi/softfloat&#10;../../JuceLibraryCode-iOS"
                        binaryPath="Bin/iOS/Release" stripLocalSymbols="1" linkTimeOptimisation="1"
-                       iosDeploymentTarget="14.0"/>
+                       iosDeploymentTarget="15.0"/>
       </CONFIGURATIONS>
       <MODULEPATHS>
         <MODULEPATH id="juce_audio_basics" path="Modules"/>
