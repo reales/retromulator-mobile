@@ -738,6 +738,11 @@ namespace retromulator
 
     HeadlessProcessor::~HeadlessProcessor()
     {
+        // Must join before any member is destroyed: ~thread on a joinable
+        // thread calls std::terminate.
+        m_shuttingDown.store(true);
+        joinBootThread();
+
         m_keyboardState.removeListener(this);
 
         if(m_savedEditorWidth > 0 && m_savedEditorHeight > 0)
@@ -905,8 +910,10 @@ namespace retromulator
             // Wait for old device destruction to finish before allocating new
             // DSP resources — MemoryBuffer temp files must not overlap.
             // Timeout after 5 seconds to avoid hanging if the old DSP thread is stuck.
-            for(int i = 0; i < 500 && !oldDeviceReady->load(); ++i)
+            for(int i = 0; i < 500 && !oldDeviceReady->load() && !m_shuttingDown.load(); ++i)
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            if(m_shuttingDown.load())
+                return;
             if(!oldDeviceReady->load())
                 fprintf(stderr, "[Boot] WARNING: old device destruction timed out, proceeding anyway\n");
 
@@ -959,6 +966,10 @@ namespace retromulator
             fprintf(stderr, "[Boot] async: suspendProcessing(false)\n");
             suspendProcessing(false);
             m_isBooting.store(false);
+
+            // Skip the callback during shutdown: it would run after `this` is gone.
+            if(m_shuttingDown.load())
+                return;
 
             // Notify the message thread that boot is complete.
             juce::MessageManager::callAsync([this, onComplete]()

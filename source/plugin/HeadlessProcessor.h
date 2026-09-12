@@ -285,6 +285,7 @@ namespace retromulator
         std::atomic<uint32_t> m_modWheelSeq{0};
 
         std::atomic<bool> m_isBooting{false};
+        std::atomic<bool> m_shuttingDown{false};
         std::unique_ptr<std::thread> m_bootThread;
         void joinBootThread();
         std::atomic<bool> m_pendingResend{false};

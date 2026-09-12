@@ -4,7 +4,14 @@
 #include <vector>
 #include <cstdint>
 
-#if __has_include(<memory_resource>)
+// std::pmr::get_default_resource is missing from the iOS 15 libc++ runtime even
+// though <memory_resource> is present in the SDK, so __has_include is not enough.
+#if defined(__APPLE__)
+#include <Availability.h>
+#endif
+
+#if __has_include(<memory_resource>) && \
+    (!defined(__IPHONE_OS_VERSION_MIN_REQUIRED) || __IPHONE_OS_VERSION_MIN_REQUIRED >= 160000)
 #include <memory_resource>
 #define SYNTHLIB_HAS_PMR 1
 #else
