@@ -199,7 +199,9 @@ namespace dsp56k
 			}
 			else
 			{
-				m_interruptFunc(this);
+				// inline the common case of execPeriph so we skip the indirect call
+				if(m_interruptFunc != m_execPeripheralsFunc || perif[0]->getTargetClock() <= m_instructions)
+					m_interruptFunc(this);
 
 #if DSP56300_DEBUGGER
 				if(m_debugger)
@@ -387,8 +389,8 @@ namespace dsp56k
 
 		template<TWord mmm>
 		TWord	decode_MMMRRR_read		( TWord _rrr );
-		TWord	decode_MMMRRR_read		( TWord _mmm, TWord _rrr );
-		TWord	decode_XMove_MMRRR		( TWord _mm, TWord _rrr );
+		ASMJIT_FORCE_INLINE TWord	decode_MMMRRR_read		( TWord _mmm, TWord _rrr );
+		ASMJIT_FORCE_INLINE TWord	decode_XMove_MMRRR		( TWord _mm, TWord _rrr );
 
 		TWord	decode_RRR_read			( TWord _mmmrrr ) const;
 		TWord	decode_RRR_read			( TWord _mmmrrr, int _shortDisplacement ) const;
