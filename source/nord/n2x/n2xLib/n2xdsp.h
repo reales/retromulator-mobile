@@ -69,6 +69,7 @@ namespace n2x
 
 		dsp56k::SpscSemaphore m_triggerInterruptDone;
 		uint32_t m_irqInterruptDone = 0;
+		uint32_t m_pendingIrqDone = 0;
 
 		hwLib::HaltDSP m_haltDSP;
 

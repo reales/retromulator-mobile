@@ -202,12 +202,28 @@ namespace n2x
 		else
 #endif
 		{
+			// Firmware sends hundreds of word+irq pairs per note; waiting per irq stalls the DSPs.
+			// Only drain when the DSPs are halted or the backlog grows.
+			constexpr uint32_t maxOutstanding = 8;
+
 			dsp().injectExternalInterrupt(_irq);
 			dsp().injectExternalInterrupt(m_irqInterruptDone);
+			++m_pendingIrqDone;
 
-			hwLib::ScopedResumeDSP rA(m_hardware.getDSPA().getHaltDSP());
-			hwLib::ScopedResumeDSP rB(m_hardware.getDSPB().getHaltDSP());
-			m_triggerInterruptDone.wait();
+			const bool halted = m_hardware.requestingHaltDSPs();
+
+			if(halted || m_pendingIrqDone > maxOutstanding)
+			{
+				hwLib::ScopedResumeDSP rA(m_hardware.getDSPA().getHaltDSP());
+				hwLib::ScopedResumeDSP rB(m_hardware.getDSPB().getHaltDSP());
+
+				const uint32_t target = halted ? 0 : maxOutstanding / 2;
+				while(m_pendingIrqDone > target)
+				{
+					m_triggerInterruptDone.wait();
+					--m_pendingIrqDone;
+				}
+			}
 		}
 
 		hdiTransferDSPtoUC();

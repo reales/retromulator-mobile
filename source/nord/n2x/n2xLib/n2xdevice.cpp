@@ -129,15 +129,7 @@ namespace n2x
 
 			m_state.receive(_response, _ev);
 			auto e = _ev;
-			// Use the hardware's MIDI offset counter (DSP production position)
-			// rather than m_numSamplesProcessed (audio consumption position).
-			// On iOS the audio thread can burst-request samples faster than the
-			// gated DSPs produce them, causing m_numSamplesProcessed to drift
-			// ahead — which schedules notes into the DSP's future, adding
-			// variable latency.  The hardware counter tracks actual DSP output
-			// and stays tightly coupled to real-time.
-			const auto hwOffset = m_hardware.getMidiOffsetCounter();
-			e.offset += hwOffset + getExtraLatencySamples();
+			e.offset += m_numSamplesProcessed + getExtraLatencySamples();
 			m_hardware.sendMidi(e);
 		}
 		else

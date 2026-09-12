@@ -38,6 +38,10 @@
 
 #include <cstring>
 #include <fstream>
+
+#if JucePlugin_Build_Standalone && JUCE_IOS
+#include <juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h>
+#endif
 #include <sys/stat.h>
 
 #ifdef __APPLE__
@@ -698,10 +702,6 @@ namespace retromulator
         // for its file-backed mmap fallback.
         initIOSTempPath();
 
-        // Request a 512-sample buffer from the iOS audio session.
-        // The default 128 is too small for the DSP interpreter.
-        setIOSPreferredBufferSize(1024);
-
         // Symlink Documents/Retromulator → App Group container so
         // iTunes/Finder File Sharing sees the shared data folder.
         linkDocumentsToSharedFolder();
@@ -974,11 +974,41 @@ namespace retromulator
             // Notify the message thread that boot is complete.
             juce::MessageManager::callAsync([this, onComplete]()
             {
+                applyStandaloneBufferSize();
                 updateHostDisplay(juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged(true));
                 if(onComplete)
                     onComplete();
             });
         });
+    }
+
+    void HeadlessProcessor::applyStandaloneBufferSize()
+    {
+#if JucePlugin_Build_Standalone && JUCE_IOS
+        if(wrapperType != wrapperType_Standalone)
+            return;
+
+        const auto type = m_synthType;
+        juce::MessageManager::callAsync([type]()
+        {
+            auto* holder = juce::StandalonePluginHolder::getInstance();
+            if(!holder)
+                return;
+            auto& dm = holder->deviceManager;
+            auto* dev = dm.getCurrentAudioDevice();
+            if(!dev)
+                return;
+
+            auto setup = dm.getAudioDeviceSetup();
+            const int target = isJitCore(type) ? std::max(512, setup.bufferSize) : dev->getDefaultBufferSize();
+            if(setup.bufferSize == target)
+                return;
+
+            setup.bufferSize = target;
+            dm.setAudioDeviceSetup(setup, true);
+            fprintf(stderr, "[iOS] Standalone buffer size set to %d (actual %d)\n", target, dev->getCurrentBufferSizeSamples());
+        });
+#endif
     }
 
     // ── Patch name extraction ─────────────────────────────────────────────────

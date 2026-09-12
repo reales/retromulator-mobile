@@ -145,6 +145,9 @@ namespace retromulator
         static void linkDocumentsToSharedFolder();
        #endif
 
+        // Standalone only: 56k cores need a 512 sample buffer minimum, others use the device default.
+        void applyStandaloneBufferSize();
+
         // ── pluginLib::Processor pure virtuals ──────────────────────────────
         synthLib::Device* createDevice() override;
         pluginLib::Controller* createController() override;

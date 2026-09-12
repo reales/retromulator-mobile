@@ -247,6 +247,9 @@ namespace n2x
 						m_debugUnderrunCount, m_debugCallbackCount,
 						processCount, available, processCount - available,
 						esaiB.getAudioOutputs().size());
+					// Revoke credits for zeroed frames so the DSP does not
+					// render them later and grow the output surplus.
+					m_dspNotifyCorrection -= static_cast<int32_t>(processCount - available);
 					if(available > 0)
 						esaiB.processAudioOutputInterleaved(outputs, available);
 					// Zero-fill the remainder
