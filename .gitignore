@@ -17,8 +17,10 @@ JuceLibraryCode-iOS/
 # Third-party JUCE modules (add manually, see README)
 Modules/
 
-# Assets and local patches (not distributed)
+# Assets and local patches (not distributed), except the parameter
+# descriptions, which are compiled into the plugin as BinaryData
 Assets/
+!Assets/Params/
 patches/
 
 # Custom GUI (proprietary, not distributed)
