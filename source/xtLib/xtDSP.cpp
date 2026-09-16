@@ -64,6 +64,8 @@ namespace xt
 //		getPeriph().disableTimers(true);
 
 		m_periphX.getEssi0().writeEmptyAudioIn(8);
+		// ESSI0 only: ESSI1 is the inter-DSP ring, a dropped frame there desyncs the expansion
+		m_periphX.getEssi0().setMaxInputBacklog(8192);
 
 		hdi08().setRXRateLimit(0);
 		hdi08().setTransmitDataAlwaysEmpty(false);

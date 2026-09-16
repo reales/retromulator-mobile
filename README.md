@@ -44,6 +44,10 @@ locally to build:
 - DSP56300 runs in interpreter mode (`DSP56K_NO_JIT=1`).
 - Single-DSP synths (Virus A/B/C, DX7) run comfortably; dual-DSP synths
   (N2X, Virus TI) are MIPS-bound on older devices.
+- The Roland SC cores run in interpreter mode (`RONALDO_NO_JIT=1`).
+- A MIDI file player is built in: load a `.mid` file and play it through the
+  current core.
+- Playback can be rendered offline to WAV or AAC.
 
 ## Hardware Cores
 
@@ -56,6 +60,10 @@ locally to build:
 | Commodore 64 SID 6581 / 8580 | reSID cycle-accurate |
 | General Instrument AY-3-8910 / Yamaha YM2149 | Ayumi + Ym2149Synth voice engine |
 | Roland JP-8000 (JE-8086) | Motorola DSP 56300 cycle-accurate |
+| Roland SC-55mkII | H8/500 cycle-accurate CPU emulation |
+| Roland SC-88 / SC-88VL | H8/500 cycle-accurate CPU emulation |
+| Roland SC-88Pro | SH-2 and H8/500 cycle-accurate CPU emulation |
+| Roland SC-8850 | SH-2 and H8/500 cycle-accurate CPU emulation |
 | Waldorf microQ | Motorola DSP 56300 cycle-accurate |
 | Waldorf Microwave XT | Motorola DSP 56300 cycle-accurate |
 | Wurlitzer 200A (OpenWurli) | Physical modeling synthesis |
@@ -71,6 +79,8 @@ The **Wurlitzer 200A (OpenWurli)** is a physical model of the Wurlitzer 200A ele
 The **Yamaha OPL3** emulates the YMF262 FM synthesis chip (18 channels, 4-operator) using the Nuked OPL3 engine. It loads SBI patch files with bank navigation via folder hierarchy, pitch bend, and voice stealing.
 
 The **Commodore 64 SID** emulates the MOS 6581 / 8580 chip using the reSID engine with 3-voice polyphony, oldest-voice stealing, and a full 50 Hz macro playback engine (wavetable, pulsetable, filtertable, speedtable). It loads GoatTracker `.sng` banks and `.ins` standalone instruments, with live MIDI control via CC 1 (vibrato depth), CC 22 (pitch bend range, 1–48 semitones), CC 64 (sustain pedal), CC 71 (resonance), CC 74 (cutoff), and CC 75 (pulse width).
+
+The **Roland SC series** (SC-55mkII, SC-88, SC-88VL, SC-88Pro, SC-8850) runs the original firmware on SH-2 and H8/500 CPU emulation, with the XP and GP custom chips emulated for sample playback and effects. Each model needs its own ROM set (not included). Tone names are read from the ROMs.
 
 The **AY-3-8910 / YM2149** emulates the 3-channel PSG used in the ZX Spectrum, Amstrad CPC, MSX, and Atari ST using the Ayumi engine, with a voice layer re-implementing the Ym2149Synth firmware: soft volume and pitch envelopes, glide, vibrato, detune, noise delay, and transpose. Voices are controlled via CC 1–11 and patches are stored in a user bank.
 

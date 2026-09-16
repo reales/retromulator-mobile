@@ -23,6 +23,9 @@
 
 #ifdef __APPLE__
 #	include <mach/mach.h>
+#	include <mach/mach_time.h>
+#	include <pthread/qos.h>
+#	include <algorithm>
 #endif
 
 namespace dsp56k
@@ -108,23 +111,37 @@ namespace dsp56k
 		default: return false;
 		}
 
-		sched_param sch_params;
-		sch_params.sched_priority = prio;
-
-		const auto id = pthread_self();
-
-		const auto result = pthread_setschedparam(id, SCHED_OTHER, &sch_params);
-		if(result)
-			LOG("Failed to set thread priority to " << prio << ", error code " << result);
-
+		// pthread_setschedparam permanently opts the thread out of the QOS class system,
+		// after which pthread_set_qos_class_self_np fails with EPERM and the thread becomes
+		// eligible for the efficiency cores. Set QOS first and skip setschedparam entirely
+		// for the priorities that have a QOS equivalent.
 		if (_priority == ThreadPriority::Highest)
 		{
-			pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+			const auto qos = pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+			if (qos)
+				LOG("Failed to set QOS class to USER_INTERACTIVE, error code " << qos);
 			setCurrentThreadRealtimeParameters(0, 0);
+#if defined(__aarch64__)
+			// FPCR is per-thread; flush denormals to zero on the DSP thread too
+			uint64_t fpcr;
+			__asm__ __volatile__("mrs %0, fpcr" : "=r"(fpcr));
+			__asm__ __volatile__("msr fpcr, %0" : : "r"(fpcr | (1ull << 24)));
+#endif
 		}
 		else if (_priority == ThreadPriority::Low || _priority == ThreadPriority::Lowest)
 		{
-			pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0);
+			const auto qos = pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0);
+			if (qos)
+				LOG("Failed to set QOS class to BACKGROUND, error code " << qos);
+		}
+		else
+		{
+			sched_param sch_params;
+			sch_params.sched_priority = prio;
+
+			const auto result = pthread_setschedparam(pthread_self(), SCHED_OTHER, &sch_params);
+			if(result)
+				LOG("Failed to set thread priority to " << prio << ", error code " << result);
 		}
 #else
 		// On Linux we adjust the 'nice' value of the thread
@@ -160,11 +177,12 @@ namespace dsp56k
 	{
 #ifdef __APPLE__
 		bool usePeriod = true;
-		if (_samplerate)
+		if (!_samplerate || !_blocksize)
 		{
-			// set some reasonable realtime parameters for audio processing, disable fixed call frequency
-			_samplerate = 44100;
-			_blocksize = 2048;
+			// no fixed call frequency known. Keep the window short: the budget is renewed once per
+			// window, and a 46 ms one leaves the DSP workers unprotected for tens of ms at a time
+			_samplerate = 48000;
+			_blocksize = 128;
 			usePeriod = false;
 		}
 	    // Compute the nominal "period" between activations, in microseconds.
@@ -175,13 +193,22 @@ namespace dsp56k
 		// computation = 25% - 35% of the period
 	    // constraint = equal to or slightly above the period
 	    // The exact numbers aren't critical, but they should stay consistent.
-	    uint32_t computation = static_cast<uint32_t>(periodUsec * 0.30);
-	    uint32_t constraint  = static_cast<uint32_t>(periodUsec * 1.05);
-	    uint32_t period      = usePeriod ? static_cast<uint32_t>(periodUsec) : 0;
+	    double computationUsec = periodUsec * 0.30;
+	    double constraintUsec  = periodUsec * 1.05;
 
 	    // Clamp to sane limits
-	    computation = std::max<uint32_t>(computation, 1000); // >= 1 ms
-	    constraint = std::max<uint32_t>(constraint, computation + 1000); // Always > computation
+	    computationUsec = std::max(computationUsec, 1000.0); // >= 1 ms
+	    constraintUsec = std::max(constraintUsec, computationUsec + 1000.0); // Always > computation
+
+	    // thread_policy_set expects mach absolute time units, not microseconds. On Apple Silicon
+	    // the timebase is not 1 ns per tick, so passing microseconds makes the policy be rejected.
+	    mach_timebase_info_data_t timebase{};
+	    mach_timebase_info(&timebase);
+	    const double usecToAbs = 1000.0 * static_cast<double>(timebase.denom) / static_cast<double>(timebase.numer);
+
+	    uint32_t computation = static_cast<uint32_t>(computationUsec * usecToAbs);
+	    uint32_t constraint  = static_cast<uint32_t>(constraintUsec * usecToAbs);
+	    uint32_t period      = usePeriod ? static_cast<uint32_t>(periodUsec * usecToAbs) : 0;
 
 	    // Prepare Mach real-time policy
 	    thread_time_constraint_policy_data_t policy;
@@ -198,8 +225,8 @@ namespace dsp56k
 
 	    if (result == KERN_SUCCESS)
 	    {
-			LOG("Success setting thread realtime parameters: period=" << period << " us, computation=" << computation << " us, constraint=" << constraint << " us");
-	        return false;
+			LOG("Success setting thread realtime parameters: period=" << period << ", computation=" << computation << ", constraint=" << constraint << " (mach abs units)");
+	        return true;
 	    }
 		LOG("Failed to set thread realtime parameters, error code " << result);
 #endif

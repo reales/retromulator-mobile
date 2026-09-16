@@ -19,6 +19,18 @@ namespace dsp56k
 
 	void Audio::readRXimpl(RxFrame& _values)
 	{
+		auto discard = m_discardInputFrames.load(std::memory_order_acquire);
+
+		if(discard)
+		{
+			while(discard && !m_audioInputs.empty())
+			{
+				m_audioInputs.pop_front();
+				--discard;
+			}
+			m_discardInputFrames.store(discard, std::memory_order_release);
+		}
+
 		m_audioInputs.waitNotEmpty();
 		_values = m_audioInputs.pop_front();
 	}

@@ -19,7 +19,7 @@ Modules/
 
 # Assets and local patches (not distributed), except the parameter
 # descriptions, which are compiled into the plugin as BinaryData
-Assets/
+Assets/*
 !Assets/Params/
 patches/
 

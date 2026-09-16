@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <array>
@@ -132,9 +133,26 @@ namespace dsp56k
 			processAudioOutputInterleaved<T>(_outputs, _sampleFrames);
 		}
 		
+		// 0 = off. Beyond latency + this many frames the DSP is asked to skip forward
+		void setMaxInputBacklog(const uint32_t _frames)	{ m_maxInputBacklog = _frames; }
+		uint64_t getDroppedInputFrames() const			{ return m_droppedInputFrames.load(std::memory_order_relaxed); }
+
 		template<typename T, typename TFunc>
 		void processAudioInput(const uint32_t _frames, const size_t _latency, const TFunc& _createRxFrame)
 		{
+			if(m_maxInputBacklog)
+			{
+				const auto depth = m_audioInputs.size();
+
+				if(depth > _latency + m_maxInputBacklog && !m_discardInputFrames.load(std::memory_order_relaxed))
+				{
+					// aim for half the bound so recovery does not sit on the threshold and retrigger
+					const auto excess = static_cast<uint32_t>(depth - (_latency + (m_maxInputBacklog >> 1)));
+					m_discardInputFrames.store(excess, std::memory_order_release);
+					m_droppedInputFrames.fetch_add(excess, std::memory_order_relaxed);
+				}
+			}
+
 			for (uint32_t s = 0; s < _frames; ++s)
 			{
 				// INPUT
@@ -277,5 +295,11 @@ namespace dsp56k
 		RingBuffer<RxFrame, RingBufferSize, true, false> m_audioInputs;
 		RingBuffer<TxFrame, RingBufferSize, true, false> m_audioOutputs;
 		size_t m_latency = 0;
+
+		// host publishes how many input frames to skip, the DSP thread pops them
+		// on its own (consumer) side of the SPSC ring where doing so is safe
+		std::atomic<uint32_t> m_discardInputFrames{0};
+		std::atomic<uint64_t> m_droppedInputFrames{0};
+		uint32_t m_maxInputBacklog = 0;
 	};
 }

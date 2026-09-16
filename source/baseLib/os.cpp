@@ -20,6 +20,12 @@ namespace baseLib
         _controlfp(_DN_FLUSH, _MCW_DN);
 #elif defined(HAVE_SSE)
         _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+#elif defined(__aarch64__) || defined(_M_ARM64)
+        // FPCR bit 24 (FZ) flushes denormals to zero. Per-thread, so call this on every
+        // thread that does float work, not just once at startup.
+        uint64_t fpcr;
+        __asm__ __volatile__("mrs %0, fpcr" : "=r"(fpcr));
+        __asm__ __volatile__("msr fpcr, %0" : : "r"(fpcr | (1ull << 24)));
 #endif
     }
 

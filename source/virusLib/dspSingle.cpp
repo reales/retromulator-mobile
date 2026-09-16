@@ -24,6 +24,10 @@ namespace virusLib
 
 		m_buffer.resize(dsp56k::alignedSize(requiredMemSize));
 
+		// shed an unrecoverable input backlog after a dip below realtime. Host-fed ring only,
+		// the inter-DSP ESAI on periphY must not drop frames
+		m_audio.setMaxInputBacklog(8192);
+
 		auto* buf = m_buffer.data();
 		buf = dsp56k::alignedAddress(buf);
 

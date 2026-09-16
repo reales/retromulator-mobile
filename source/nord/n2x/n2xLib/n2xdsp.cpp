@@ -99,6 +99,7 @@ namespace n2x
 		hdi08().setRXRateLimit(0);
 
 		m_periphX.getEsai().writeEmptyAudioIn(2);
+		m_periphX.getEsai().setMaxInputBacklog(8192);
 
 		m_hdiUC.setRxEmptyCallback([&](const bool _needMoreData)
 		{

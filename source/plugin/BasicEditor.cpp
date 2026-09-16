@@ -26,27 +26,6 @@ namespace retromulator
         folder.findChildFiles(out, juce::File::findFiles, recursive, "*.pfm");
     }
 
-    static void findBankFiles(SynthType type, const juce::File& folder,
-                              juce::Array<juce::File>& out, bool recursive = false)
-    {
-        if(type == SynthType::SID)
-        {
-            folder.findChildFiles(out, juce::File::findFiles, recursive, "*.sng");
-            folder.findChildFiles(out, juce::File::findFiles, recursive, "*.ins");
-            folder.findChildFiles(out, juce::File::findFiles, recursive, "*.sid");
-        }
-        else if(type == SynthType::Ayumi)
-        {
-            // Presets live in the Factory/User subfolders — always search into them.
-            folder.findChildFiles(out, juce::File::findFiles, true, "*.ay");
-        }
-        else if(type == SynthType::OPL3)
-        {
-            folder.findChildFiles(out, juce::File::findFiles, true, "*.sbi");
-        }
-        else findSysexFiles(folder, out, recursive);
-    }
-
     static juce::String normalisePath(const std::string& p)
     {
         if(p.empty()) return {};
@@ -340,7 +319,7 @@ namespace retromulator
             if(isAkaiSampler(type))
                 findSoundFiles(folder, files);
             else
-                findBankFiles(type, folder, files);
+                findSysexFiles(folder, files);
             files.sort();
 
             const int fileCount = files.size();
@@ -524,8 +503,7 @@ namespace retromulator
 
             // Update current item text (name may have been set after initial load via sendBankMessage).
             // Skip for Akai — program names are already set correctly by loadSoundFile.
-            // Skip for SID — instrument names from the bank file are authoritative.
-            if(progCount > 0 && !isAkaiSampler(type) && type != SynthType::SID)
+            if(progCount > 0 && !isAkaiSampler(type))
             {
                 const juce::String patch(m_proc.getPatchName());
                 const juce::String bankStr = currentPath.isEmpty()
@@ -560,12 +538,9 @@ namespace retromulator
         const auto lastFolder = HeadlessProcessor::getLastLoadFolder(type);
         const auto destFolder = lastFolder.empty() ? synthFolder : juce::File(lastFolder);
 
-        const juce::String filter =
-              isAkaiSampler(type)        ? juce::String(kSoundFilePattern)
-            : type == SynthType::SID     ? juce::String("*.sng;*.ins;*.sid")
-            : type == SynthType::Ayumi   ? juce::String("*.ay")
-            : type == SynthType::OPL3    ? juce::String("*.sbi")
-                                          : juce::String("*.syx;*.mid;*.bin;*.pfm");
+        const juce::String filter = isAkaiSampler(type)
+            ? juce::String(kSoundFilePattern)
+            : juce::String("*.syx;*.mid;*.bin;*.pfm");
 
         const juce::String title = isAkaiSampler(type)
             ? "Select SFZ, SF2, ZBP, ZBB, WAV, AIF, FLAC or OGG sound file"
@@ -643,22 +618,8 @@ namespace retromulator
                         }
                     }
 
-                    const bool loaded = safe->m_proc.loadPresetFromFile(
-                        dest.getFullPathName().toStdString(),
-                        dest.getFileNameWithoutExtension().toStdString());
-
-                    // Only GoatTracker-packed PSIDs parse; drop the copy if not.
-                    if(!loaded && synthType == SynthType::SID && dest.hasFileExtension("sid"))
-                    {
-                        dest.deleteFile();
-                        juce::NativeMessageBox::showMessageBoxAsync(
-                            juce::MessageBoxIconType::WarningIcon,
-                            "Unsupported .sid File",
-                            "This .sid file is not a GoatTracker-packed PSID and "
-                            "cannot be imported as a SID instrument bank.\n\n"
-                            "Only .sid files produced by GoatTracker 2's \"Pack\" "
-                            "exporter are supported.");
-                    }
+                    safe->m_proc.loadPresetFromFile(dest.getFullPathName().toStdString(),
+                                                    dest.getFileNameWithoutExtension().toStdString());
                     safe->updateStatus();
                 });
         });
@@ -866,7 +827,7 @@ namespace retromulator
 
             const juce::File synthFolder2(HeadlessProcessor::getSynthDataFolder(type));
             juce::Array<juce::File> files;
-            findBankFiles(type, synthFolder2, files);
+            findSysexFiles(synthFolder2, files);
             files.sort();
             if(files.isEmpty()) return;
 
@@ -970,7 +931,7 @@ namespace retromulator
             else
             {
                 juce::Array<juce::File> files;
-                findBankFiles(type, folder, files);
+                findSysexFiles(folder, files);
                 files.sort();
                 if(!files.isEmpty())
                     self.m_proc.loadPresetFromFile(files[0].getFullPathName().toStdString(),
@@ -1080,7 +1041,7 @@ namespace retromulator
             else
             {
                 juce::Array<juce::File> files;
-                findBankFiles(newType, folder, files);
+                findSysexFiles(folder, files);
                 files.sort();
                 if(!files.isEmpty())
                     self.m_proc.loadPresetFromFile(files[0].getFullPathName().toStdString(),

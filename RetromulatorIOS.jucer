@@ -12,12 +12,12 @@
               buildVST="0" buildRTAS="0" buildAAX="0" buildAUv3="1" pluginFormats="buildAUv3,buildStandalone"
               pluginCharacteristicsValue="pluginIsSynth,pluginWantsMidiIn"
               enableIAA="0" jucerFormatVersion="1" displaySplashScreen="0"
-              cppLanguageStandard="17" companyWebsite="httos://www.discodsp.com"
+              cppLanguageStandard="20" companyWebsite="httos://www.discodsp.com"
               companyEmail="contactus@discodsp.com">
   <EXPORTFORMATS>
     <XCODE_IPHONE targetFolder="Builds/iOS" objCExtraSuffix="Retromulator_ios"
                   postbuildCommand="" iosDevelopmentTeamID="" iosAppGroupsId="group.com.discodsp.retromulator"
-                  appGroupsEnabled="1" extraDefs="JUCE_REPORT_APP_USAGE=0&#10;JUCE_WEB_BROWSER=0&#10;JUCE_USE_CURL=0&#10;JUCE_MODAL_LOOPS_PERMITTED=1&#10;ASMJIT_STATIC=1&#10;JUCE_IGNORE_VST3_MISMATCHED_PARAMETER_ID_WARNING=1&#10;DSP56K_NO_JIT=1&#10;OUTSIDE_SPEEX=1&#10;FLOATING_POINT=1&#10;RANDOM_PREFIX=synthLib_speex"
+                  appGroupsEnabled="1" extraDefs="JUCE_REPORT_APP_USAGE=0&#10;JUCE_WEB_BROWSER=0&#10;JUCE_USE_CURL=0&#10;JUCE_MODAL_LOOPS_PERMITTED=1&#10;ASMJIT_STATIC=1&#10;JUCE_IGNORE_VST3_MISMATCHED_PARAMETER_ID_WARNING=1&#10;DSP56K_NO_JIT=1&#10;RONALDO_NO_JIT=1&#10;OUTSIDE_SPEEX=1&#10;FLOATING_POINT=1&#10;RANDOM_PREFIX=synthLib_speex"
                   extraCompilerFlags="-Wno-deprecated-declarations -include AppConfig.h"
                   extraLinkerFlags="" smallIcon="" bigIcon="" extraPlistEntries="&lt;key&gt;UIFileSharingEnabled&lt;/key&gt;&lt;true/&gt;&#10;&lt;key&gt;LSSupportsOpeningDocumentsInPlace&lt;/key&gt;&lt;true/&gt;"
                   customEntitlements="" UIFileSharingEnabled="1" UISupportsDocumentBrowser="1"
@@ -25,10 +25,10 @@
                   iosBluetoothPermissionNeeded="1" iosAppGroups="1">
       <CONFIGURATIONS>
         <CONFIGURATION name="Debug" isDebug="1" targetName="Retromulator" iosCompatibility="15.0"
-                       headerPath="../../source&#10;../../source/plugin&#10;../../source/bridge&#10;../../source/ronaldo&#10;../../source/JUCE/modules&#10;../../source/dsp56300/source&#10;../../source/dsp56300/source/dsp56kBase&#10;../../source/dsp56300/source/dsp56kEmu&#10;../../source/dsp56300/source/asmjit/src&#10;../../source/mc68k&#10;../../source/mc68k/Musashi&#10;../../source/mc68k/Musashi/softfloat&#10;../../JuceLibraryCode-iOS"
+                       headerPath="../../source&#10;../../source/plugin&#10;../../source/bridge&#10;../../source/ronaldo&#10;../../source/ronaldo/custom_chips&#10;../../source/cpu&#10;../../source/JUCE/modules&#10;../../source/dsp56300/source&#10;../../source/dsp56300/source/dsp56kBase&#10;../../source/dsp56300/source/dsp56kEmu&#10;../../source/dsp56300/source/asmjit/src&#10;../../source/mc68k&#10;../../source/mc68k/Musashi&#10;../../source/mc68k/Musashi/softfloat&#10;../../JuceLibraryCode-iOS"
                        binaryPath="Bin/iOS/Debug" iosDeploymentTarget="15.0"/>
         <CONFIGURATION name="Release" isDebug="0" targetName="Retromulator" iosCompatibility="15.0"
-                       headerPath="../../source&#10;../../source/plugin&#10;../../source/bridge&#10;../../source/ronaldo&#10;../../source/JUCE/modules&#10;../../source/dsp56300/source&#10;../../source/dsp56300/source/dsp56kBase&#10;../../source/dsp56300/source/dsp56kEmu&#10;../../source/dsp56300/source/asmjit/src&#10;../../source/mc68k&#10;../../source/mc68k/Musashi&#10;../../source/mc68k/Musashi/softfloat&#10;../../JuceLibraryCode-iOS"
+                       headerPath="../../source&#10;../../source/plugin&#10;../../source/bridge&#10;../../source/ronaldo&#10;../../source/ronaldo/custom_chips&#10;../../source/cpu&#10;../../source/JUCE/modules&#10;../../source/dsp56300/source&#10;../../source/dsp56300/source/dsp56kBase&#10;../../source/dsp56300/source/dsp56kEmu&#10;../../source/dsp56300/source/asmjit/src&#10;../../source/mc68k&#10;../../source/mc68k/Musashi&#10;../../source/mc68k/Musashi/softfloat&#10;../../JuceLibraryCode-iOS"
                        binaryPath="Bin/iOS/Release" stripLocalSymbols="1" linkTimeOptimisation="1"
                        iosDeploymentTarget="15.0"/>
       </CONFIGURATIONS>
@@ -56,6 +56,7 @@
       <FILE id="pj0000" name="parameterDescriptions_akai.json" compile="0" resource="1" file="Assets/Params/parameterDescriptions_akai.json"/>
       <FILE id="pj0001" name="parameterDescriptions_ayumi.json" compile="0" resource="1" file="Assets/Params/parameterDescriptions_ayumi.json"/>
       <FILE id="pj0002" name="parameterDescriptions_dx7.json" compile="0" resource="1" file="Assets/Params/parameterDescriptions_dx7.json"/>
+      <FILE id="pj0013" name="parameterDescriptions_emu88.json" compile="0" resource="1" file="Assets/Params/parameterDescriptions_emu88.json"/>
       <FILE id="pj0003" name="parameterDescriptions_generic.json" compile="0" resource="1" file="Assets/Params/parameterDescriptions_generic.json"/>
       <FILE id="pj0004" name="parameterDescriptions_je8086.json" compile="0" resource="1" file="Assets/Params/parameterDescriptions_je8086.json"/>
       <FILE id="pj0005" name="parameterDescriptions_mq.json" compile="0" resource="1" file="Assets/Params/parameterDescriptions_mq.json"/>
@@ -86,6 +87,10 @@
       <FILE id="f0010" name="BasicEditor.cpp" compile="1" resource="0" file="source/plugin/BasicEditor.cpp"/>
       <FILE id="f0011" name="ParameterPool.h" compile="0" resource="0" file="source/plugin/ParameterPool.h"/>
       <FILE id="f0012" name="ParameterPool.cpp" compile="1" resource="0" file="source/plugin/ParameterPool.cpp"/>
+      <FILE id="f0013" name="Emu88ToneTable.h" compile="0" resource="0" file="source/plugin/Emu88ToneTable.h"/>
+      <FILE id="f0014" name="Emu88ToneTable.cpp" compile="1" resource="0" file="source/plugin/Emu88ToneTable.cpp"/>
+      <FILE id="f0015" name="Emu88Tones.h" compile="0" resource="0" file="source/plugin/Emu88Tones.h"/>
+      <FILE id="f0016" name="Emu88Tones.cpp" compile="1" resource="0" file="source/plugin/Emu88Tones.cpp"/>
     </GROUP>
     <GROUP id="jucePluginLib" name="jucePluginLib">
       <FILE id="jp001" name="bypassBuffer.cpp" compile="1" resource="0" file="source/jucePluginLib/bypassBuffer.cpp"/>
@@ -184,6 +189,11 @@
       <FILE id="hw001" name="am29f.cpp" compile="1" resource="0" file="source/hardwareLib/am29f.cpp"/>
       <FILE id="hw002" name="dspBootCode.cpp" compile="1" resource="0" file="source/hardwareLib/dspBootCode.cpp"/>
       <FILE id="hw003" name="haltDSP.cpp" compile="1" resource="0" file="source/hardwareLib/haltDSP.cpp"/>
+      <FILE id="hw010" name="hd44780.cpp" compile="1" resource="0" file="source/hardwareLib/hd44780.cpp"/>
+      <FILE id="hw011" name="hd44780.h" compile="0" resource="0" file="source/hardwareLib/hd44780.h"/>
+      <FILE id="hw012" name="sed1335.cpp" compile="1" resource="0" file="source/hardwareLib/sed1335.cpp"/>
+      <FILE id="hw013" name="sed1335.h" compile="0" resource="0" file="source/hardwareLib/sed1335.h"/>
+      <FILE id="hw014" name="tc160g22af.h" compile="0" resource="0" file="source/hardwareLib/tc160g22af.h"/>
       <FILE id="hw004" name="i2c.cpp" compile="1" resource="0" file="source/hardwareLib/i2c.cpp"/>
       <FILE id="hw005" name="i2cFlash.cpp" compile="1" resource="0" file="source/hardwareLib/i2cFlash.cpp"/>
       <FILE id="hw006" name="lcd.cpp" compile="1" resource="0" file="source/hardwareLib/lcd.cpp"/>
@@ -301,6 +311,146 @@
       <FILE id="je010" name="sysexRemoteControl.cpp" compile="1" resource="0"
             file="source/ronaldo/je8086/jeLib/sysexRemoteControl.cpp"/>
       <FILE id="je011" name="storage.cpp" compile="1" resource="0" file="source/ronaldo/common/storage.cpp"/>
+    </GROUP>
+    <GROUP id="emu88lib" name="88lib">
+      <FILE id="e8001" name="deviceModel.cpp" compile="1" resource="0" file="source/ronaldo/88emu/88lib/deviceModel.cpp"/>
+      <FILE id="e8002" name="deviceModel.h" compile="0" resource="0" file="source/ronaldo/88emu/88lib/deviceModel.h"/>
+      <FILE id="e8003" name="hardwareDevice.cpp" compile="1" resource="0" file="source/ronaldo/88emu/88lib/hardwareDevice.cpp"/>
+      <FILE id="e8004" name="hardwareDevice.h" compile="0" resource="0" file="source/ronaldo/88emu/88lib/hardwareDevice.h"/>
+      <FILE id="e8005" name="rom.cpp" compile="1" resource="0" file="source/ronaldo/88emu/88lib/rom.cpp"/>
+      <FILE id="e8006" name="rom.h" compile="0" resource="0" file="source/ronaldo/88emu/88lib/rom.h"/>
+      <FILE id="e8007" name="romRegistry.h" compile="0" resource="0" file="source/ronaldo/88emu/88lib/romRegistry.h"/>
+      <FILE id="e8008" name="romloader.cpp" compile="1" resource="0" file="source/ronaldo/88emu/88lib/romloader.cpp"/>
+      <FILE id="e8009" name="romloader.h" compile="0" resource="0" file="source/ronaldo/88emu/88lib/romloader.h"/>
+      <FILE id="e8010" name="sc55_submcu.cpp" compile="1" resource="0" file="source/ronaldo/88emu/88lib/sc55_submcu.cpp"/>
+      <FILE id="e8011" name="sc55_submcu.h" compile="0" resource="0" file="source/ronaldo/88emu/88lib/sc55_submcu.h"/>
+      <FILE id="e8012" name="sc55mk2.cpp" compile="1" resource="0" file="source/ronaldo/88emu/88lib/sc55mk2.cpp"/>
+      <FILE id="e8013" name="sc55mk2.h" compile="0" resource="0" file="source/ronaldo/88emu/88lib/sc55mk2.h"/>
+      <FILE id="e8014" name="sc88.cpp" compile="1" resource="0" file="source/ronaldo/88emu/88lib/sc88.cpp"/>
+      <FILE id="e8015" name="sc88.h" compile="0" resource="0" file="source/ronaldo/88emu/88lib/sc88.h"/>
+      <FILE id="e8016" name="sc8850.cpp" compile="1" resource="0" file="source/ronaldo/88emu/88lib/sc8850.cpp"/>
+      <FILE id="e8017" name="sc8850.h" compile="0" resource="0" file="source/ronaldo/88emu/88lib/sc8850.h"/>
+      <FILE id="e8018" name="sc8850_submcu.cpp" compile="1" resource="0" file="source/ronaldo/88emu/88lib/sc8850_submcu.cpp"/>
+      <FILE id="e8019" name="sc8850_submcu.h" compile="0" resource="0" file="source/ronaldo/88emu/88lib/sc8850_submcu.h"/>
+      <FILE id="e8020" name="sc88Thread.cpp" compile="1" resource="0" file="source/ronaldo/88emu/88lib/sc88Thread.cpp"/>
+      <FILE id="e8021" name="sc88Thread.h" compile="0" resource="0" file="source/ronaldo/88emu/88lib/sc88Thread.h"/>
+      <FILE id="e8022" name="sc88_submcu.cpp" compile="1" resource="0" file="source/ronaldo/88emu/88lib/sc88_submcu.cpp"/>
+      <FILE id="e8023" name="sc88_submcu.h" compile="0" resource="0" file="source/ronaldo/88emu/88lib/sc88_submcu.h"/>
+      <FILE id="e8024" name="sc88pro.cpp" compile="1" resource="0" file="source/ronaldo/88emu/88lib/sc88pro.cpp"/>
+      <FILE id="e8025" name="sc88pro.h" compile="0" resource="0" file="source/ronaldo/88emu/88lib/sc88pro.h"/>
+      <FILE id="e8026" name="sc88types.h" compile="0" resource="0" file="source/ronaldo/88emu/88lib/sc88types.h"/>
+    </GROUP>
+    <GROUP id="xpLib" name="xp">
+      <FILE id="xc001" name="xp.cpp" compile="1" resource="0" file="source/ronaldo/custom_chips/xp/xp.cpp"/>
+      <FILE id="xc002" name="xp.h" compile="0" resource="0" file="source/ronaldo/custom_chips/xp/xp.h"/>
+      <FILE id="xc003" name="xp_dsp.cpp" compile="1" resource="0" file="source/ronaldo/custom_chips/xp/xp_dsp.cpp"/>
+      <FILE id="xc004" name="xp_dsp.h" compile="0" resource="0" file="source/ronaldo/custom_chips/xp/xp_dsp.h"/>
+      <FILE id="xc005" name="xp_dsp_jit.h" compile="0" resource="0" file="source/ronaldo/custom_chips/xp/xp_dsp_jit.h"/>
+      <FILE id="xc006" name="xp_dsp_jit_arm64.h" compile="0" resource="0" file="source/ronaldo/custom_chips/xp/xp_dsp_jit_arm64.h"/>
+      <FILE id="xc007" name="xp_dsp_jit_x86.h" compile="0" resource="0" file="source/ronaldo/custom_chips/xp/xp_dsp_jit_x86.h"/>
+      <FILE id="xc008" name="xp_dsp_naive.cpp" compile="1" resource="0" file="source/ronaldo/custom_chips/xp/xp_dsp_naive.cpp"/>
+      <FILE id="xc009" name="xp_dsp_ops.h" compile="0" resource="0" file="source/ronaldo/custom_chips/xp/xp_dsp_ops.h"/>
+      <FILE id="xc010" name="xp_dsp_program.cpp" compile="1" resource="0" file="source/ronaldo/custom_chips/xp/xp_dsp_program.cpp"/>
+      <FILE id="xc011" name="xp_dsp_program.h" compile="0" resource="0" file="source/ronaldo/custom_chips/xp/xp_dsp_program.h"/>
+      <FILE id="xc012" name="xp_dsp_state.h" compile="0" resource="0" file="source/ronaldo/custom_chips/xp/xp_dsp_state.h"/>
+      <FILE id="xc013" name="xp_host.cpp" compile="1" resource="0" file="source/ronaldo/custom_chips/xp/xp_host.cpp"/>
+      <FILE id="xc014" name="xp_voice.cpp" compile="1" resource="0" file="source/ronaldo/custom_chips/xp/xp_voice.cpp"/>
+      <FILE id="xc015" name="xp_voice_common.h" compile="0" resource="0" file="source/ronaldo/custom_chips/xp/xp_voice_common.h"/>
+    </GROUP>
+    <GROUP id="gpLib" name="gp">
+      <FILE id="gc001" name="gp.cpp" compile="1" resource="0" file="source/ronaldo/custom_chips/gp/gp.cpp"/>
+      <FILE id="gc002" name="gp.h" compile="0" resource="0" file="source/ronaldo/custom_chips/gp/gp.h"/>
+      <FILE id="gc003" name="gp_effects.cpp" compile="1" resource="0" file="source/ronaldo/custom_chips/gp/gp_effects.cpp"/>
+      <FILE id="gc004" name="gp_internal.h" compile="0" resource="0" file="source/ronaldo/custom_chips/gp/gp_internal.h"/>
+    </GROUP>
+    <GROUP id="cpuCommon" name="common">
+      <FILE id="cc001" name="device.hpp" compile="0" resource="0" file="source/cpu/common/device.hpp"/>
+      <FILE id="cc002" name="iomux.hpp" compile="0" resource="0" file="source/cpu/common/iomux.hpp"/>
+      <FILE id="cc003" name="sched.hpp" compile="0" resource="0" file="source/cpu/common/sched.hpp"/>
+      <FILE id="cc004" name="test_util.hpp" compile="0" resource="0" file="source/cpu/common/test_util.hpp"/>
+      <FILE id="cc005" name="types.hpp" compile="0" resource="0" file="source/cpu/common/types.hpp"/>
+    </GROUP>
+    <GROUP id="cpuH8500" name="h8500">
+      <FILE id="h5001" name="adc.cpp" compile="1" resource="0" file="source/cpu/h8500/adc.cpp"/>
+      <FILE id="h5002" name="adc.hpp" compile="0" resource="0" file="source/cpu/h8500/adc.hpp"/>
+      <FILE id="h5003" name="bus.hpp" compile="0" resource="0" file="source/cpu/h8500/bus.hpp"/>
+      <FILE id="h5004" name="chip.cpp" compile="1" resource="0" file="source/cpu/h8500/chip.cpp"/>
+      <FILE id="h5005" name="chip.hpp" compile="0" resource="0" file="source/cpu/h8500/chip.hpp"/>
+      <FILE id="h5006" name="cpu.cpp" compile="1" resource="0" file="source/cpu/h8500/cpu.cpp"/>
+      <FILE id="h5007" name="cpu.hpp" compile="0" resource="0" file="source/cpu/h8500/cpu.hpp"/>
+      <FILE id="h5008" name="decode.hpp" compile="0" resource="0" file="source/cpu/h8500/decode.hpp"/>
+      <FILE id="h5009" name="disasm.cpp" compile="1" resource="0" file="source/cpu/h8500/disasm.cpp"/>
+      <FILE id="h5010" name="disasm.hpp" compile="0" resource="0" file="source/cpu/h8500/disasm.hpp"/>
+      <FILE id="h5011" name="dtc.cpp" compile="1" resource="0" file="source/cpu/h8500/dtc.cpp"/>
+      <FILE id="h5012" name="dtc.hpp" compile="0" resource="0" file="source/cpu/h8500/dtc.hpp"/>
+      <FILE id="h5013" name="exec.cpp" compile="1" resource="0" file="source/cpu/h8500/exec.cpp"/>
+      <FILE id="h5014" name="frt.cpp" compile="1" resource="0" file="source/cpu/h8500/frt.cpp"/>
+      <FILE id="h5015" name="frt.hpp" compile="0" resource="0" file="source/cpu/h8500/frt.hpp"/>
+      <FILE id="h5016" name="h8532_regs.cpp" compile="1" resource="0" file="source/cpu/h8500/h8532_regs.cpp"/>
+      <FILE id="h5017" name="h8532_regs.hpp" compile="0" resource="0" file="source/cpu/h8500/h8532_regs.hpp"/>
+      <FILE id="h5018" name="h8570_regs.cpp" compile="1" resource="0" file="source/cpu/h8500/h8570_regs.cpp"/>
+      <FILE id="h5019" name="h8570_regs.hpp" compile="0" resource="0" file="source/cpu/h8500/h8570_regs.hpp"/>
+      <FILE id="h5020" name="icache.hpp" compile="0" resource="0" file="source/cpu/h8500/icache.hpp"/>
+      <FILE id="h5021" name="intc.cpp" compile="1" resource="0" file="source/cpu/h8500/intc.cpp"/>
+      <FILE id="h5022" name="intc.hpp" compile="0" resource="0" file="source/cpu/h8500/intc.hpp"/>
+      <FILE id="h5023" name="isp_regs.cpp" compile="1" resource="0" file="source/cpu/h8500/isp_regs.cpp"/>
+      <FILE id="h5024" name="isp_regs.hpp" compile="0" resource="0" file="source/cpu/h8500/isp_regs.hpp"/>
+      <FILE id="h5025" name="machine.hpp" compile="0" resource="0" file="source/cpu/h8500/machine.hpp"/>
+      <FILE id="h5026" name="ports.cpp" compile="1" resource="0" file="source/cpu/h8500/ports.cpp"/>
+      <FILE id="h5027" name="ports.hpp" compile="0" resource="0" file="source/cpu/h8500/ports.hpp"/>
+      <FILE id="h5028" name="pwm.cpp" compile="1" resource="0" file="source/cpu/h8500/pwm.cpp"/>
+      <FILE id="h5029" name="pwm.hpp" compile="0" resource="0" file="source/cpu/h8500/pwm.hpp"/>
+      <FILE id="h5030" name="sci.cpp" compile="1" resource="0" file="source/cpu/h8500/sci.cpp"/>
+      <FILE id="h5031" name="sci.hpp" compile="0" resource="0" file="source/cpu/h8500/sci.hpp"/>
+      <FILE id="h5032" name="timing.cpp" compile="1" resource="0" file="source/cpu/h8500/timing.cpp"/>
+      <FILE id="h5033" name="timing.hpp" compile="0" resource="0" file="source/cpu/h8500/timing.hpp"/>
+      <FILE id="h5034" name="tmr.cpp" compile="1" resource="0" file="source/cpu/h8500/tmr.cpp"/>
+      <FILE id="h5035" name="tmr.hpp" compile="0" resource="0" file="source/cpu/h8500/tmr.hpp"/>
+      <FILE id="h5036" name="types.hpp" compile="0" resource="0" file="source/cpu/h8500/types.hpp"/>
+      <FILE id="h5037" name="wdt.cpp" compile="1" resource="0" file="source/cpu/h8500/wdt.cpp"/>
+      <FILE id="h5038" name="wdt.hpp" compile="0" resource="0" file="source/cpu/h8500/wdt.hpp"/>
+    </GROUP>
+    <GROUP id="cpuSh2" name="sh2">
+      <FILE id="s2001" name="adc.cpp" compile="1" resource="0" file="source/cpu/sh2/adc.cpp"/>
+      <FILE id="s2002" name="adc.hpp" compile="0" resource="0" file="source/cpu/sh2/adc.hpp"/>
+      <FILE id="s2003" name="bsc.cpp" compile="1" resource="0" file="source/cpu/sh2/bsc.cpp"/>
+      <FILE id="s2004" name="bsc.hpp" compile="0" resource="0" file="source/cpu/sh2/bsc.hpp"/>
+      <FILE id="s2005" name="bsc7034.cpp" compile="1" resource="0" file="source/cpu/sh2/bsc7034.cpp"/>
+      <FILE id="s2006" name="bsc7034.hpp" compile="0" resource="0" file="source/cpu/sh2/bsc7034.hpp"/>
+      <FILE id="s2007" name="bus.hpp" compile="0" resource="0" file="source/cpu/sh2/bus.hpp"/>
+      <FILE id="s2008" name="chip.hpp" compile="0" resource="0" file="source/cpu/sh2/chip.hpp"/>
+      <FILE id="s2009" name="cmt.cpp" compile="1" resource="0" file="source/cpu/sh2/cmt.cpp"/>
+      <FILE id="s2010" name="cmt.hpp" compile="0" resource="0" file="source/cpu/sh2/cmt.hpp"/>
+      <FILE id="s2011" name="cpu.cpp" compile="1" resource="0" file="source/cpu/sh2/cpu.cpp"/>
+      <FILE id="s2012" name="cpu.hpp" compile="0" resource="0" file="source/cpu/sh2/cpu.hpp"/>
+      <FILE id="s2013" name="decode.hpp" compile="0" resource="0" file="source/cpu/sh2/decode.hpp"/>
+      <FILE id="s2014" name="disasm.cpp" compile="1" resource="0" file="source/cpu/sh2/disasm.cpp"/>
+      <FILE id="s2015" name="disasm.hpp" compile="0" resource="0" file="source/cpu/sh2/disasm.hpp"/>
+      <FILE id="s2016" name="dmac.cpp" compile="1" resource="0" file="source/cpu/sh2/dmac.cpp"/>
+      <FILE id="s2017" name="dmac.hpp" compile="0" resource="0" file="source/cpu/sh2/dmac.hpp"/>
+      <FILE id="s2018" name="dmac7034.cpp" compile="1" resource="0" file="source/cpu/sh2/dmac7034.cpp"/>
+      <FILE id="s2019" name="dmac7034.hpp" compile="0" resource="0" file="source/cpu/sh2/dmac7034.hpp"/>
+      <FILE id="s2020" name="exec.cpp" compile="1" resource="0" file="source/cpu/sh2/exec.cpp"/>
+      <FILE id="s2021" name="icache.hpp" compile="0" resource="0" file="source/cpu/sh2/icache.hpp"/>
+      <FILE id="s2022" name="intc.cpp" compile="1" resource="0" file="source/cpu/sh2/intc.cpp"/>
+      <FILE id="s2023" name="intc.hpp" compile="0" resource="0" file="source/cpu/sh2/intc.hpp"/>
+      <FILE id="s2024" name="itu.cpp" compile="1" resource="0" file="source/cpu/sh2/itu.cpp"/>
+      <FILE id="s2025" name="itu.hpp" compile="0" resource="0" file="source/cpu/sh2/itu.hpp"/>
+      <FILE id="s2026" name="machine.hpp" compile="0" resource="0" file="source/cpu/sh2/machine.hpp"/>
+      <FILE id="s2027" name="machine7034.hpp" compile="0" resource="0" file="source/cpu/sh2/machine7034.hpp"/>
+      <FILE id="s2028" name="mtu.cpp" compile="1" resource="0" file="source/cpu/sh2/mtu.cpp"/>
+      <FILE id="s2029" name="mtu.hpp" compile="0" resource="0" file="source/cpu/sh2/mtu.hpp"/>
+      <FILE id="s2030" name="ports.cpp" compile="1" resource="0" file="source/cpu/sh2/ports.cpp"/>
+      <FILE id="s2031" name="ports.hpp" compile="0" resource="0" file="source/cpu/sh2/ports.hpp"/>
+      <FILE id="s2032" name="ports7034.cpp" compile="1" resource="0" file="source/cpu/sh2/ports7034.cpp"/>
+      <FILE id="s2033" name="ports7034.hpp" compile="0" resource="0" file="source/cpu/sh2/ports7034.hpp"/>
+      <FILE id="s2034" name="ports7042.cpp" compile="1" resource="0" file="source/cpu/sh2/ports7042.cpp"/>
+      <FILE id="s2035" name="ports7042.hpp" compile="0" resource="0" file="source/cpu/sh2/ports7042.hpp"/>
+      <FILE id="s2036" name="sci.cpp" compile="1" resource="0" file="source/cpu/sh2/sci.cpp"/>
+      <FILE id="s2037" name="sci.hpp" compile="0" resource="0" file="source/cpu/sh2/sci.hpp"/>
+      <FILE id="s2038" name="types.hpp" compile="0" resource="0" file="source/cpu/sh2/types.hpp"/>
+      <FILE id="s2039" name="wdt.cpp" compile="1" resource="0" file="source/cpu/sh2/wdt.cpp"/>
+      <FILE id="s2040" name="wdt.hpp" compile="0" resource="0" file="source/cpu/sh2/wdt.hpp"/>
     </GROUP>
     <GROUP id="dx7Lib" name="dx7Lib">
       <FILE id="dx001" name="HD6303R.cpp" compile="1" resource="0" file="source/dx7Lib/HD6303R.cpp"/>
