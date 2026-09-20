@@ -23,6 +23,7 @@ namespace opl3Lib { class Device; }
 namespace sidLib { class Device; }
 namespace ayumiLib { class Device; }
 namespace emu88Lib { class HardwareDevice; }
+namespace trackerLib { class Device; }
 
 namespace retromulator
 {
@@ -184,6 +185,70 @@ namespace retromulator
         // the decay, so reading this is free and the fall rate is independent of how
         // often the editor repaints.
         float getMidiChannelLevel(int channel) const;
+        // 16 MIDI channels, or one bar per module channel for the tracker (1..16).
+        int getMidiMeterBars() const;
+
+        // ── Trackermeister (tracker module player) ─────────────────────────
+        // The device owns the transport: note 12 plays, 14 stops, 13 and 15 step a
+        // playlist, and 24 upward start the song at order (note - 24). These mirror that
+        // for the editor.
+        trackerLib::Device* getTrackerDevice() const;
+        bool loadTrackerModule(std::vector<uint8_t>&& data, const std::string& fileName);
+        bool hasTrackerModule() const;
+        std::string getTrackerModuleName() const { return m_trackerFileName; }
+
+        // Modules live in the Tracker data folder. An entry is a path relative to it: an
+        // iOS pick is security-scoped and may not be reachable on the next launch, so a
+        // picked or shared file is copied in first, and only its name is remembered.
+        static std::string getTrackerFolder();
+        static bool isTrackerModuleName(const juce::String& fileName);
+        // Copies a picked URL into the Tracker folder. Returns the entry, empty on failure.
+        static std::string importTrackerFile(const juce::URL& url);
+        bool loadTrackerModuleFile(const std::string& entry, bool addToRecent = true);
+
+        // Playlist: entries, kept in the plugin state. More than one is playlist mode,
+        // where a song stops at its end and the next one starts, wrapping around. Folders
+        // are scanned for modules and .m3u/.m3u8 files are expanded. Nothing starts
+        // playing; false if no entry could be loaded.
+        bool openTrackerPaths(const std::vector<std::string>& entries);
+        const std::vector<std::string>& getTrackerPlaylist() const { return m_trackerPlaylist; }
+        int  getTrackerPlaylistIndex() const { return m_trackerPlaylistIndex; }
+        bool isTrackerPlaylistMode() const { return m_trackerPlaylist.size() > 1; }
+        // Loads that entry and plays it. Entries that do not load are skipped forward.
+        bool playTrackerPlaylistIndex(int index);
+        bool stepTrackerPlaylist(int delta);
+        static bool isTrackerPlaylistFile(const juce::File& file);
+        // .m3u text to entries: only modules already in the Tracker folder resolve.
+        static std::vector<std::string> parseTrackerPlaylist(const juce::String& m3uText);
+        juce::String getTrackerPlaylistText() const;
+        // Entries, newest first.
+        static std::vector<std::string> getRecentTrackerModules();
+        static void addRecentTrackerModule(const std::string& entry);
+
+        void playTracker();
+        void stopTracker();
+        // A host playhead tempo or incoming MIDI clock. The standalone app only has the latter.
+        bool hasTrackerHostTempo() const;
+        bool isTrackerPlaying() const;
+        // Scales the song so its initial BPM lands on the host tempo.
+        bool getTrackerTempoSync() const { return m_trackerTempoSync; }
+        void setTrackerTempoSync(bool enabled);
+        // Same thread, progress and cancel as the MIDI render. 256 tap sinc, song end stops it.
+        bool startTrackerRender(const juce::URL& destUrl, RenderFormat format);
+
+        // A module handed over by the system ("Open in", Files, a share sheet). Copies it
+        // in, switches to the Tracker core if needed, loads and plays it. Message thread.
+        void openTrackerDocument(const juce::URL& url);
+        // Same for a .mid: 88emu boots if its ROMs are there, the song loads and plays.
+        void openMidiDocument(const juce::URL& url);
+        // Entry point for the app delegate: picks one of the two by extension.
+        // Several modules in one batch (a multi-select share) become a playlist.
+        void openDocuments(const std::vector<juce::URL>& urls);
+       #if JUCE_IOS
+        // The standalone app's processor receives what Files hands the app. A document
+        // that arrives before it exists (a cold launch) waits for the registration.
+        static void setIOSDocumentTarget(HeadlessProcessor* target);
+       #endif
 
         // Message thread, periodic: mirrors the edited part and program into their
         // host parameters so automation lanes show the real state.
@@ -334,6 +399,10 @@ namespace retromulator
         // Override to capture incoming pitch bend / CC1 for the on-screen wheels.
         void processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) override;
 
+        // The emulation workers render ahead of the host on their own threads, so the performance
+        // controller only sizes them correctly if they belong to the host's audio workgroup.
+        void audioWorkgroupContextChanged(const juce::AudioWorkgroup& _workgroup) override;
+
         juce::MidiKeyboardState& getKeyboardState() { return m_keyboardState; }
 
         // On-screen wheel mirroring of incoming MIDI. Editor polls these at animation rate.
@@ -441,6 +510,29 @@ namespace retromulator
         std::atomic<bool>  m_renderCancel{false};
         std::atomic<float> m_renderProgress{0.0f};
         void renderMidiToWav(const juce::URL& destUrl, RenderFormat format);
+        void renderTrackerToWav(const juce::URL& destUrl, RenderFormat format);
+        // One song of a render. The caller brackets it with begin/endTrackerRender.
+        void renderTrackerSong(const juce::URL& destUrl, RenderFormat format, float progressStart, float progressSpan);
+        bool beginTrackerRender();
+        void endTrackerRender();
+        bool m_trackerRenderSync = false;
+        // Encodes if asked, then copies the finished render out to the picked location.
+        void deliverRender(const juce::File& wavFile, const juce::URL& destUrl, RenderFormat format);
+
+        std::vector<uint8_t> m_trackerFileData;
+        std::string          m_trackerFileName;
+        bool                 m_trackerTempoSync = false;
+        // Set by openTrackerDocument: the module starts once the core has booted.
+        std::atomic<bool>    m_trackerPlayAfterLoad{false};
+        void reloadTrackerModule();
+
+        std::vector<std::string> m_trackerPlaylist;
+        int                      m_trackerPlaylistIndex = 0;
+        void setTrackerPlaylist(std::vector<std::string>&& paths, int index);
+        bool loadTrackerPlaylistEntry(int index, int direction);
+        // Message thread: moves on when the device reports a finished song.
+        struct TrackerPlaylistTimer;
+        std::unique_ptr<TrackerPlaylistTimer> m_trackerPlaylistTimer;
         // AAC has no JUCE encoder: CoreAudioFormat is read-only. The rendered WAV is
         // converted by AVFoundation. Implemented in HeadlessProcessor_ios.mm.
         static bool encodeWavToAac(const std::string& wavPath, const std::string& aacPath,

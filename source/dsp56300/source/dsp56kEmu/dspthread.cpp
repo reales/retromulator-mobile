@@ -123,6 +123,8 @@ namespace dsp56k
 	void DSPThread::threadFunc()
 	{
 		ThreadTools::setCurrentThreadPriority(ThreadPriority::Highest);
+		// must follow the RT policy above: Apple only admits realtime threads
+		ThreadTools::joinAudioWorkgroup();
 		ThreadTools::setCurrentThreadName(m_name.empty() ? "DSP" : "DSP " + m_name);
 
 		uint64_t instructions = 0;
@@ -144,6 +146,10 @@ namespace dsp56k
 #endif
 		while(m_runThread)
 		{
+			// cheap no-op unless the host handed over a different workgroup; the thread may well
+			// have started before the host reported one at all
+			ThreadTools::joinAudioWorkgroup();
+
 			{
 				Guard g(m_mutex);
 

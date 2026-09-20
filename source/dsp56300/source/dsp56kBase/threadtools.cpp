@@ -6,6 +6,8 @@
 
 #include "logging.h"
 
+#include <atomic>
+
 #ifdef DSP56K_USE_VTUNE_JIT_PROFILING_API
 #include "vtuneSdk/include/ittnotify.h"
 #endif
@@ -231,5 +233,36 @@ namespace dsp56k
 		LOG("Failed to set thread realtime parameters, error code " << result);
 #endif
 		return false;
+	}
+
+	namespace
+	{
+		std::atomic<ThreadTools::AudioWorkgroupJoiner> g_workgroupJoiner{nullptr};
+
+		// bumped whenever the host hands over a different workgroup. Worker threads compare it
+		// against what they last joined, so calling joinAudioWorkgroup() every job costs one
+		// relaxed load in the common case where nothing changed.
+		std::atomic<uint32_t> g_workgroupGeneration{0};
+		thread_local uint32_t t_joinedGeneration = 0;
+	}
+
+	void ThreadTools::setAudioWorkgroupJoiner(AudioWorkgroupJoiner _joiner)
+	{
+		g_workgroupJoiner.store(_joiner, std::memory_order_release);
+		g_workgroupGeneration.fetch_add(1, std::memory_order_release);
+	}
+
+	void ThreadTools::joinAudioWorkgroup()
+	{
+		const auto generation = g_workgroupGeneration.load(std::memory_order_acquire);
+
+		if (generation == t_joinedGeneration)
+			return;
+
+		if (const auto joiner = g_workgroupJoiner.load(std::memory_order_acquire))
+		{
+			joiner();
+			t_joinedGeneration = generation;
+		}
 	}
 }

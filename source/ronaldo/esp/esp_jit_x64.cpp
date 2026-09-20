@@ -1,3 +1,5 @@
+#if !defined(RONALDO_NO_JIT)
+
 #include "esp_jit_x64.h"
 
 #include <iostream>
@@ -485,3 +487,5 @@ namespace esp
 		return ptr(g_regBasePtr, m_pool.getPointerOffset(m_data.coreData->hostRegPtr), 4);
 	}
 }
+
+#endif // RONALDO_NO_JIT

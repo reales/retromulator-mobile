@@ -1,3 +1,5 @@
+#if !defined(RONALDO_NO_JIT)
+
 #include "esp_jit.h"
 
 #include "esp_jit_types.h"
@@ -19,3 +21,5 @@ namespace esp
 #endif
 	}
 }
+
+#endif // RONALDO_NO_JIT

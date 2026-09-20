@@ -1,3 +1,5 @@
+#if !defined(RONALDO_NO_JIT)
+
 #include "esp_jit_x64_pool.h"
 
 #include <cassert>
@@ -316,3 +318,5 @@ namespace esp
 		throw std::runtime_error("Failed to allocate register");
 	}
 }
+
+#endif // RONALDO_NO_JIT

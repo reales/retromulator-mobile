@@ -22,6 +22,7 @@ namespace retromulator
         SID       = 10, // Commodore 64 SID 6581/8580 (reSID)
         Ayumi     = 11, // AY-3-8910 / YM2149 PSG (Ayumi + Ym2149Synth voice engine)
         Emu88     = 12, // Roland SC-88 / 88VL / 88Pro / SC-8850 / SC-55mkII (Ronaldo 88emu)
+        Trackermeister = 13, // XM / MOD (FT2 replayer) and S3M / IT (Schism player) module player
 
         Count
     };
@@ -31,7 +32,7 @@ namespace retromulator
     inline bool isSynthDisabledOnIOS(SynthType t)
     {
        #if TARGET_OS_IPHONE
-        return t == SynthType::VirusTI || t == SynthType::JE8086;
+        return t == SynthType::VirusTI;
        #else
         (void)t;
         return false;
@@ -60,14 +61,13 @@ namespace retromulator
             SynthType::AkaiS1000,
             SynthType::Ayumi,
             SynthType::DX7,
-           #if !TARGET_OS_IPHONE
             SynthType::JE8086,
-           #endif
             SynthType::MicroQ,
             SynthType::NordN2X,
             SynthType::OPL3,
             SynthType::OpenWurli,
             SynthType::SID,
+            SynthType::Trackermeister,
             SynthType::VirusABC,
            #if !TARGET_OS_IPHONE
             SynthType::VirusTI,
@@ -95,6 +95,7 @@ namespace retromulator
             case SynthType::SID:       return "SID";
             case SynthType::Ayumi:     return "Ayumi";
             case SynthType::Emu88:     return "88emu";
+            case SynthType::Trackermeister: return "Tracker";
             default:                   return "None";
         }
     }

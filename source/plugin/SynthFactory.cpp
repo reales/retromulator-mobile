@@ -27,6 +27,7 @@
 #include "opl3Lib/device.h"
 #include "sidLib/device.h"
 #include "ayumiLib/device.h"
+#include "trackerLib/device.h"
 
 #include "synthLib/romLoader.h"
 #include "synthLib/deviceException.h"
@@ -199,6 +200,12 @@ namespace retromulator
             {
                 synthLib::DeviceCreateParams p;
                 return new ayumiLib::Device(p);
+            }
+
+            case SynthType::Trackermeister:
+            {
+                synthLib::DeviceCreateParams p;
+                return new trackerLib::Device(p);
             }
 
             case SynthType::Emu88:

@@ -14,6 +14,9 @@ source/
   plugin/                     Headless processor + BasicEditor (GPL)
   dsp56300/                   Vendored DSP56300 emulator
   mc68k/                      Vendored Motorola 68k core
+  cpu/                        H8/500 and SH-2 CPU cores
+  ronaldo/                    Roland SC series and JE-8086 hardware
+  trackerLib/                 FT2 and Schism module replayers
   ...                         other library sources
 ```
 
@@ -44,9 +47,21 @@ locally to build:
 - DSP56300 runs in interpreter mode (`DSP56K_NO_JIT=1`).
 - Single-DSP synths (Virus A/B/C, DX7) run comfortably; dual-DSP synths
   (N2X, Virus TI) are MIPS-bound on older devices.
-- The Roland SC cores run in interpreter mode (`RONALDO_NO_JIT=1`).
+- The Roland SC and JE-8086 cores run in interpreter mode (`RONALDO_NO_JIT=1`).
+  iOS maps an executable page but kills the process on the first call into it,
+  so the JE-8086 ESP steps its four ASICs through `ESPCore::step` instead of
+  asmjit, and the `esp_jit` sources compile to nothing.
+- The emulation worker threads (DSP56300, microQ, XT, N2X, SC-88, JE-8086)
+  render ahead of the host, so they set a realtime policy and then join the
+  host's audio workgroup. Without that the performance controller does not
+  count them as audio work.
 - A MIDI file player is built in: load a `.mid` file and play it through the
   current core.
+- The Tracker core loads `.xm`, `.mod`, `.s3m` and `.it` modules, with
+  playlists and `.m3u` support. A pick on iOS is security-scoped, so modules
+  are copied into the Tracker folder and only the name is kept.
+- Modules and `.mid` files can be opened from Files or a share sheet: the app
+  declares the document types and switches to the matching core.
 - Playback can be rendered offline to WAV or AAC.
 
 ## Hardware Cores
@@ -59,18 +74,19 @@ locally to build:
 | Clavia Nord Lead / Rack 2x | Motorola DSP 56300 cycle-accurate |
 | Commodore 64 SID 6581 / 8580 | reSID cycle-accurate |
 | General Instrument AY-3-8910 / Yamaha YM2149 | Ayumi + Ym2149Synth voice engine |
-| Roland JP-8000 (JE-8086) | Motorola DSP 56300 cycle-accurate |
+| Roland JP-8000 (JE-8086) | H8S CPU and 4x ESP ASIC cycle-accurate emulation |
 | Roland SC-55mkII | H8/500 cycle-accurate CPU emulation |
 | Roland SC-88 / SC-88VL | H8/500 cycle-accurate CPU emulation |
 | Roland SC-88Pro | SH-2 and H8/500 cycle-accurate CPU emulation |
 | Roland SC-8850 | SH-2 and H8/500 cycle-accurate CPU emulation |
+| Tracker modules (XM / MOD / S3M / IT) | FT2 replayer and Schism player |
 | Waldorf microQ | Motorola DSP 56300 cycle-accurate |
 | Waldorf Microwave XT | Motorola DSP 56300 cycle-accurate |
 | Wurlitzer 200A (OpenWurli) | Physical modeling synthesis |
 | Yamaha DX7 | HD6303R + YM21280 EGS + YM21290 OPS (VDX7) |
 | Yamaha OPL3 / YMF262 | Nuked OPL3 v1.8 |
 
-Most DSP-based synths require their original ROM firmware to run (not included). ROMs are loaded from the application support folder at runtime. The microQ can run with an embedded fallback ROM. The Akai S1000, OpenWurli, OPL3, and AY-3-8910 cores are ROM-free.
+Most DSP-based synths require their original ROM firmware to run (not included). ROMs are loaded from the application support folder at runtime. The microQ can run with an embedded fallback ROM. The Akai S1000, OpenWurli, OPL3, AY-3-8910, and Tracker cores are ROM-free.
 
 The **Akai S1000** sampler loads SF2, SFZ, ZBP, and ZBB sample banks, as well as Akai ISO/BIN/CUE disk images, via the [SFZero](https://github.com/reales/retromulator/tree/main/Modules/SFZero) MIT-licensed engine with 8-point sinc interpolation, extended SFZ/SF2 opcode support, auto-slice drum mapping, CC20 global tuning, and discoDSP Bliss sampler format.
 
@@ -82,17 +98,21 @@ The **Commodore 64 SID** emulates the MOS 6581 / 8580 chip using the reSID engin
 
 The **Roland SC series** (SC-55mkII, SC-88, SC-88VL, SC-88Pro, SC-8850) runs the original firmware on SH-2 and H8/500 CPU emulation, with the XP and GP custom chips emulated for sample playback and effects. Each model needs its own ROM set (not included). Tone names are read from the ROMs.
 
+The **Roland JP-8000 (JE-8086)** runs the original firmware on an H8S CPU core with the four ESP ASICs that render the voices. On iOS the ESP runs through its interpreter, so the core is MIPS-heavy and sits behind the 56k cores option. It needs its own ROM set (not included) and imports `.pfm` Performance Manager banks, converted to sysex on load.
+
 The **AY-3-8910 / YM2149** emulates the 3-channel PSG used in the ZX Spectrum, Amstrad CPC, MSX, and Atari ST using the Ayumi engine, with a voice layer re-implementing the Ym2149Synth firmware: soft volume and pitch envelopes, glide, vibrato, detune, noise delay, and transpose. Voices are controlled via CC 1–11 and patches are stored in a user bank.
+
+The **Tracker** core plays tracker modules: XM and MOD through the FastTracker 2 replayer, S3M and IT through the Schism Tracker player with Nuked OPL3 for Adlib instruments. It has a transport driven by MIDI notes (play, stop, previous, next, and start at an order), playlists built from folders or `.m3u` files, and tempo sync that scales the song so its initial BPM lands on the host tempo. MOD files play with the Amiga L-R-R-L hard panning, plus a BassMX stage that moves the side signal below 150 Hz to the centre and scales the rest by a stereo width control.
 
 ## How it differs from Gearmulator
 
 Retromulator is built on top of the open-source emulation engines from [Gearmulator](https://github.com/dsp56300/gearmulator) by dsp56300. Gearmulator ships as standalone applications and open-source plugins built with CMake. Retromulator packages the same engines into a polished single-plugin experience using JUCE, with a unified rack-style UI, DAW state persistence, bank/patch browsing, focused on preset playing.
 
-The emulation cores (dsp56300, mc68k, h8s, synthLib and all synth-specific libraries) are from Gearmulator. The DX7 emulation is ported from VDX7, a separate project (see Credits below). The OPL3 emulation uses Nuked OPL3 by Nuke.YKT. The SID emulation uses reSID by Dag Lem. The AY-3-8910 / YM2149 emulation uses Ayumi by Peter Sovietov. The Akai S1000 sampler uses the SFZero module, an MIT-licensed JUCE sample engine maintained by discoDSP. The Wurlitzer 200A (OpenWurli) is a physical model fully ported by discoDSP.
+The emulation cores (dsp56300, mc68k, h8s, synthLib and all synth-specific libraries) are from Gearmulator. The DX7 emulation is ported from VDX7, a separate project (see Credits below). The OPL3 emulation uses Nuked OPL3 by Nuke.YKT. The SID emulation uses reSID by Dag Lem. The AY-3-8910 / YM2149 emulation uses Ayumi by Peter Sovietov. The Tracker core uses the FastTracker 2 clone replayer by Olav Sørensen and the Schism Tracker player. The Akai S1000 sampler uses the SFZero module, an MIT-licensed JUCE sample engine maintained by discoDSP. The Wurlitzer 200A (OpenWurli) is a physical model fully ported by discoDSP.
 
 ## Credits
 
-- **[dsp56300](https://github.com/dsp56300)** — DSP56300 emulator, Virus TI / microQ / XT / Nord N2X / JE-8086 engines, GPL v3
+- **[dsp56300](https://github.com/dsp56300)** — DSP56300 emulator, Virus TI / microQ / XT / Nord N2X engines, GPL v3
 - All contributors to [github.com/dsp56300/gearmulator](https://github.com/dsp56300/gearmulator)
 - **chiaccona** — [VDX7](https://github.com/chiaccona/VDX7), cycle-accurate Yamaha DX7 emulation (HD6303R CPU, EGS, OPS), GPL v3
 - **Nuke.YKT** — [Nuked OPL3](https://github.com/nukeykt/Nuked-OPL3), cycle-accurate YMF262 emulation, LGPL v2.1
@@ -100,6 +120,8 @@ The emulation cores (dsp56300, mc68k, h8s, synthLib and all synth-specific libra
 - **Lasse Öörni / Cadaver** — [GoatTracker](https://sourceforge.net/projects/goattracker2/) `.sng` / `.ins` format reference, GPL v2
 - **Peter Sovietov** — [Ayumi](https://github.com/true-grue/ayumi), AY-3-8910 / YM2149 emulation, MIT license
 - **Timothy Lamb** — [Ym2149Synth](https://github.com/trash80/Ym2149Synth), voice engine and soft envelope firmware, GPL v3
+- **Olav Sørensen** — [ft2-clone](https://github.com/8bitbubsy/ft2-clone), FastTracker 2 replayer for XM and MOD, BSD 3-Clause
+- **Schism Tracker contributors** — [Schism Tracker](https://github.com/schismtracker/schismtracker), Impulse Tracker player for S3M and IT, GPL v2
 - **Steve Folta** — original [SFZero](https://github.com/stevefolta/SFZero) SFZ/SF2 sample player, MIT license
 - **Leo Olivers** — SFZero JUCE module port
 - **discoDSP** — [SFZero v3.0.0](https://github.com/reales/retromulator/tree/main/Modules/SFZero), 8-point sinc interpolation, Bliss format, extended opcode support, MIT license

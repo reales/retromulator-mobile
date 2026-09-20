@@ -21,6 +21,8 @@ namespace xt
 		m_ucThread.reset(new std::thread([&]()
 		{
 			dsp56k::ThreadTools::setCurrentThreadPriority(dsp56k::ThreadPriority::Highest);
+			// must follow the RT policy above: Apple only admits realtime threads
+			dsp56k::ThreadTools::joinAudioWorkgroup();
 			dsp56k::ThreadTools::setCurrentThreadName("MC68331");
 			while(!m_destroy)
 				processUcThread();

@@ -1,3 +1,5 @@
+#if !defined(RONALDO_NO_JIT)
+
 #include "esp_jit_arm64.h"
 
 #include <array>
@@ -411,3 +413,5 @@ namespace esp
 		}
 	}
 }
+
+#endif // RONALDO_NO_JIT

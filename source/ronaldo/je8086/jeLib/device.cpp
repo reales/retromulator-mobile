@@ -9,6 +9,7 @@ namespace jeLib
 {
 	constexpr uint8_t g_paramPageMasterVolume = 6;
 	constexpr uint8_t g_paramIndexMasterVolume = 0;
+	constexpr size_t g_maxCarrySamples = 8192;
 
 	Device::Device(const synthLib::DeviceCreateParams& _params) : synthLib::Device(_params)
 	{
@@ -154,9 +155,28 @@ namespace jeLib
 
 		auto& sampleBuffer = m_thread->getSampleBuffer();
 
+		// samples that missed their block stay queued and turn into latency that never goes away.
+		// Past the limit drop them: one discontinuity, then a stream that is on time again. This
+		// thread is the ring's only consumer, so the discard has to happen here, not in the worker.
+		const auto nominal = static_cast<size_t>(getExtraLatencySamples()) + _samples;
+		if (sampleBuffer.size() > nominal + g_maxCarrySamples)
+		{
+			JeThread::SampleFrame stale;
+			while (sampleBuffer.size() > nominal && sampleBuffer.try_pop_front(stale)) {}
+		}
+
 		for (size_t i=0; i<_samples; ++i)
 		{
-			const auto s = sampleBuffer.pop_front();
+			// never block the host's render thread waiting for the engine: a slow engine would
+			// stall the whole render graph rather than just going quiet. Output silence for what
+			// is not ready yet.
+			JeThread::SampleFrame s{0, 0};
+			if (!sampleBuffer.try_pop_front(s))
+			{
+				_outputs[0][i] = 0.0f;
+				_outputs[1][i] = 0.0f;
+				continue;
+			}
 
 			_outputs[0][i] = dsp56k::dsp2sample<float>(s.first) * m_masterVolume;
 			_outputs[1][i] = dsp56k::dsp2sample<float>(s.second) * m_masterVolume;

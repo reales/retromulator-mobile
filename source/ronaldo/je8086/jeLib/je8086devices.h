@@ -146,13 +146,12 @@ namespace jeLib
 				cyclesResidual = diff % (768/2);
 
 				for (int i = 0; i < samples; i++) {
-					// Intepreter version
-					// for (size_t j = 0; j < (768/2); j++) asic0.step_cores();
-					// for (size_t j = 0; j < (768/2); j++) asic1.step_cores();
-					// for (size_t j = 0; j < (768/2); j++) asic2.step_cores();
-					// for (size_t j = 0; j < (768/2); j++) asic3.step_cores();
-
-					// JIT version
+#if defined(RONALDO_NO_JIT)
+					for (size_t j = 0; j < (768/2); j++) asic0.step_cores();
+					for (size_t j = 0; j < (768/2); j++) asic1.step_cores();
+					for (size_t j = 0; j < (768/2); j++) asic2.step_cores();
+					for (size_t j = 0; j < (768/2); j++) asic3.step_cores();
+#else
 					asic0.opt.genProgramIfDirty();
 					asic1.opt.genProgramIfDirty();
 					asic2.opt.genProgramIfDirty();
@@ -162,6 +161,7 @@ namespace jeLib
 					asic1.opt.callOptimized(&asic1);
 					asic2.opt.callOptimized(&asic2);
 					asic3.opt.callOptimized(&asic3);
+#endif
 
 					// Last DSP audio output
 					if (postSample) postSample(asic3.readGRAM(0xe8), asic3.readGRAM(0xec));

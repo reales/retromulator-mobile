@@ -1,3 +1,4 @@
+#if !defined(RONALDO_NO_JIT)
 #include <asmjit/asmjit.h>
 #include <asmjit/a64.h>
 #include <sstream>
@@ -5,6 +6,7 @@
 #include "esp_jit_x64.h"
 #include "esp_jit_arm64.h"
 #include "esp_jit_types.h"
+#endif
 
 constexpr int PRAM_SIZE = 768;
 
@@ -175,6 +177,25 @@ struct ESPOptInstr
 		}
 	}
 };
+
+#if defined(RONALDO_NO_JIT)
+
+// iOS refuses to execute a generated page: asmjit maps it, then the kernel kills the
+// process on the first call into it. The ESP runs through step_cores() instead, which
+// reads PRAM directly and needs none of the state below.
+template<int lg2eram_size>
+class ESPOptimizer
+{
+public:
+  ESPOptimizer(ESP<lg2eram_size>*) {}
+
+  void setProgramDirty() {}
+  void genProgramIfDirty() {}
+  void updateCoef(ESP<lg2eram_size>*) {}
+  void callOptimized(ESP<lg2eram_size>*) {}
+};
+
+#else
 
 template<int lg2eram_size>
 class ESPOptimizer
@@ -606,3 +627,5 @@ private:
   };
   CoreEmitter coreEmitter0, coreEmitter1;
 };
+
+#endif // RONALDO_NO_JIT

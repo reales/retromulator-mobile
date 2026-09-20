@@ -11,6 +11,7 @@
 
 #include "synthLib/deviceException.h"
 #include "synthLib/midiToSysex.h"
+#include "dsp56kBase/threadtools.h"
 #include "jucePluginLib/dummydevice.h"
 #include "baseLib/binarystream.h"
 
@@ -41,6 +42,7 @@
 #include "opl3Lib/device.h"
 #include "sidLib/device.h"
 #include "ayumiLib/device.h"
+#include "trackerLib/device.h"
 
 #include <cstring>
 #include <fstream>
@@ -334,6 +336,7 @@ namespace retromulator
         case SynthType::OPL3:      return true; // No ROM needed
         case SynthType::SID:       return true; // No ROM needed
         case SynthType::Ayumi:     return true; // No ROM needed
+        case SynthType::Trackermeister: return true; // No ROM needed
         default:                   return false;
         }
     }
@@ -775,6 +778,27 @@ namespace retromulator
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
+    // Defined ahead of the constructor: the unique_ptr member needs the complete type.
+    struct HeadlessProcessor::TrackerPlaylistTimer final : juce::Timer
+    {
+        explicit TrackerPlaylistTimer(HeadlessProcessor& p) : proc(p) {}
+        ~TrackerPlaylistTimer() override { stopTimer(); }
+
+        void timerCallback() override
+        {
+            auto* dev = proc.getTrackerDevice();
+            if(!dev || proc.m_renderActive.load() || !proc.isTrackerPlaylistMode())
+                return;
+            // C#0 and D#0 arrive on the audio thread; loading a module belongs here.
+            if(const int step = dev->consumePlaylistStep())
+                proc.stepTrackerPlaylist(step);
+            else if(dev->consumeSongFinished())
+                proc.stepTrackerPlaylist(+1);
+        }
+
+        HeadlessProcessor& proc;
+    };
+
     HeadlessProcessor::HeadlessProcessor()
         : pluginLib::Processor(
             BusesProperties()
@@ -844,10 +868,22 @@ namespace retromulator
         loadEditorSizeFromSettings();
 
         m_keyboardState.addListener(this);
+
+       #if JUCE_IOS
+        if(wrapperType == wrapperType_Standalone)
+            setIOSDocumentTarget(this);
+       #endif
     }
 
     HeadlessProcessor::~HeadlessProcessor()
     {
+       #if JUCE_IOS
+        if(wrapperType == wrapperType_Standalone)
+            setIOSDocumentTarget(nullptr);
+       #endif
+
+        m_trackerPlaylistTimer.reset();
+
         // Must join before any member is destroyed: ~thread on a joinable
         // thread calls std::terminate.
         m_shuttingDown.store(true);
@@ -930,6 +966,8 @@ namespace retromulator
                     juce::File(getSynthDataFolder(SynthType::OPL3)).createDirectory();
                 else if(type == SynthType::Emu88)
                     restoreEmu88Parts(getEmu88Part());
+                else if(type == SynthType::Trackermeister)
+                    reloadTrackerModule();
                 else if(type == SynthType::SID)
                     juce::File(getSynthDataFolder(SynthType::SID)).createDirectory();
                 else if(type == SynthType::Ayumi)
@@ -951,7 +989,7 @@ namespace retromulator
         const bool isSynchronous = (type == SynthType::JE8086 || type == SynthType::AkaiS1000
                                  || type == SynthType::OpenWurli || type == SynthType::OPL3
                                  || type == SynthType::SID || type == SynthType::Ayumi
-                                 || type == SynthType::None);
+                                 || type == SynthType::Trackermeister || type == SynthType::None);
         const bool isN2X = (type == SynthType::NordN2X);
         setLatencyBlocks(isSynchronous ? 0 : (isN2X ? 1 : 3));
 
@@ -1052,7 +1090,8 @@ namespace retromulator
             {
                 const bool isSynchronous = (type == SynthType::JE8086 || type == SynthType::AkaiS1000
                                          || type == SynthType::OpenWurli || type == SynthType::OPL3
-                                         || type == SynthType::Ayumi || type == SynthType::None);
+                                         || type == SynthType::Ayumi || type == SynthType::Trackermeister
+                                         || type == SynthType::None);
                 const bool isN2X = (type == SynthType::NordN2X);
                 setLatencyBlocks(isSynchronous ? 0 : (isN2X ? 1 : 3));
             }
@@ -1074,6 +1113,8 @@ namespace retromulator
                     juce::File(getSynthDataFolder(SynthType::OPL3)).createDirectory();
                 else if(type == SynthType::Emu88)
                     restoreEmu88Parts(getEmu88Part());
+                else if(type == SynthType::Trackermeister)
+                    reloadTrackerModule();
                 else if(type == SynthType::SID)
                     juce::File(getSynthDataFolder(SynthType::SID)).createDirectory();
                 else if(type == SynthType::Ayumi)
@@ -2340,8 +2381,19 @@ namespace retromulator
         return true;
     }
 
+    int HeadlessProcessor::getMidiMeterBars() const
+    {
+        if(const auto* dev = getTrackerDevice())
+            return dev->getMeterBars();
+        return 16;
+    }
+
     float HeadlessProcessor::getMidiChannelLevel(const int channel) const
     {
+        // Trackermeister: the device maps its module channels onto the meter bars.
+        if(const auto* dev = getTrackerDevice())
+            return dev->getMeterLevel(channel);
+
         if(channel < 0 || channel >= static_cast<int>(m_midiChannelLevels.size()))
             return 0.0f;
         return static_cast<float>(m_midiChannelLevels[static_cast<size_t>(channel)]
@@ -2742,6 +2794,611 @@ namespace retromulator
         getPlugin().setHostSamplerate(static_cast<float>(getSampleRate()), 0.0f);
         getPlugin().setBlockSize(static_cast<uint32_t>(getBlockSize()));
         suspendProcessing(false);
+    }
+
+    // ── Trackermeister ──────────────────────────────────────────────────────
+
+    trackerLib::Device* HeadlessProcessor::getTrackerDevice() const
+    {
+        if(m_synthType != SynthType::Trackermeister)
+            return nullptr;
+        return dynamic_cast<trackerLib::Device*>(m_device.get());
+    }
+
+    bool HeadlessProcessor::hasTrackerModule() const
+    {
+        const auto* dev = getTrackerDevice();
+        return dev && dev->hasModule();
+    }
+
+    bool HeadlessProcessor::loadTrackerModule(std::vector<uint8_t>&& data, const std::string& fileName)
+    {
+        auto* dev = getTrackerDevice();
+        if(!dev || data.empty() || m_renderActive.load())
+            return false;
+
+        if(!dev->loadModule(data))
+        {
+            m_trackerFileData.clear();
+            m_trackerFileName.clear();
+            return false;
+        }
+
+        m_trackerFileData = std::move(data);
+        m_trackerFileName = fileName;
+        dev->setTempoSync(m_trackerTempoSync);
+        dev->setStopAtEnd(isTrackerPlaylistMode());
+        return true;
+    }
+
+    void HeadlessProcessor::reloadTrackerModule()
+    {
+        auto* dev = getTrackerDevice();
+        if(!dev)
+            return;
+
+        dev->setTempoSync(m_trackerTempoSync);
+        dev->setStopAtEnd(isTrackerPlaylistMode());
+
+        // The bytes travel with the plugin state, so a rebooted device gets them back from here.
+        if(!m_trackerFileData.empty() && !dev->loadModule(m_trackerFileData))
+        {
+            m_trackerFileData.clear();
+            m_trackerFileName.clear();
+        }
+    }
+
+    // Modules are copied into the Tracker data folder and named relative to it: an iOS
+    // pick is security-scoped and may not be reachable on the next launch, and the
+    // container path itself can change between installs.
+    std::string HeadlessProcessor::getTrackerFolder()
+    {
+        return getSynthDataFolder(SynthType::Trackermeister);
+    }
+
+    namespace
+    {
+        constexpr int kMaxRecentTrackerModules = 10;
+
+        juce::File trackerEntryFile(const std::string& entry)
+        {
+            const juce::String s(entry);
+            if(juce::File::isAbsolutePath(s))
+                return juce::File(s);
+            return juce::File(juce::String(HeadlessProcessor::getTrackerFolder())).getChildFile(s);
+        }
+
+        std::string trackerEntryFor(const juce::File& file)
+        {
+            const juce::File folder{juce::String(HeadlessProcessor::getTrackerFolder())};
+            if(file.isAChildOf(folder))
+                return file.getRelativePathFrom(folder).replaceCharacter('\\', '/').toStdString();
+            return file.getFullPathName().toStdString();
+        }
+
+        bool isTrackerModuleFile(const juce::File& file)
+        {
+            return trackerLib::isModuleExtension(
+                file.getFileExtension().trimCharactersAtStart(".").toLowerCase().toStdString());
+        }
+    }
+
+    bool HeadlessProcessor::isTrackerModuleName(const juce::String& fileName)
+    {
+        return isTrackerModuleFile(juce::File::createFileWithoutCheckingPath(fileName));
+    }
+
+    std::vector<std::string> HeadlessProcessor::getRecentTrackerModules()
+    {
+        std::vector<std::string> result;
+        const auto file = juce::File(juce::String(getDataFolder()) + "settings.xml");
+        if(!file.existsAsFile())
+            return result;
+
+        const auto xml = juce::XmlDocument::parse(file);
+        if(!xml)
+            return result;
+
+        const auto list = xml->getStringAttribute("recentTrackerModules");
+        for(const auto& name : juce::StringArray::fromTokens(list, "\n", ""))
+        {
+            // A name whose copy has been deleted is dropped rather than offered.
+            if(name.isNotEmpty() && trackerEntryFile(name.toStdString()).existsAsFile())
+                result.push_back(name.toStdString());
+            if(static_cast<int>(result.size()) >= kMaxRecentTrackerModules)
+                break;
+        }
+        return result;
+    }
+
+    void HeadlessProcessor::addRecentTrackerModule(const std::string& entry)
+    {
+        if(entry.empty())
+            return;
+
+        juce::StringArray names;
+        names.add(juce::String(entry));
+        for(const auto& existing : getRecentTrackerModules())
+            names.addIfNotAlreadyThere(juce::String(existing));
+        while(names.size() > kMaxRecentTrackerModules)
+            names.remove(names.size() - 1);
+
+        const auto file = juce::File(juce::String(getDataFolder()) + "settings.xml");
+        std::unique_ptr<juce::XmlElement> xml;
+        if(file.existsAsFile())
+            xml = juce::XmlDocument::parse(file);
+        if(!xml)
+            xml = std::make_unique<juce::XmlElement>("RetromulatorSettings");
+
+        xml->setAttribute("recentTrackerModules", names.joinIntoString("\n"));
+        xml->writeTo(file);
+    }
+
+    std::string HeadlessProcessor::importTrackerFile(const juce::URL& url)
+    {
+        const juce::String fileName = juce::URL::removeEscapeChars(url.getFileName());
+        if(fileName.isEmpty())
+            return {};
+
+        const juce::File folder{juce::String(getTrackerFolder())};
+        folder.createDirectory();
+        const auto dest = folder.getChildFile(fileName);
+
+        // Already one of ours (the recent list, a playlist entry): nothing to copy.
+        if(url.isLocalFile() && url.getLocalFile() == dest)
+            return dest.existsAsFile() ? fileName.toStdString() : std::string();
+
+        // Read through a URL stream: on iOS the pick is a security-scoped URL that no
+        // plain file read can reach.
+        auto stream = url.createInputStream(
+            juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress));
+        if(!stream)
+            return {};
+
+        juce::MemoryBlock block;
+        stream->readIntoMemoryBlock(block);
+        if(block.getSize() == 0 || !dest.replaceWithData(block.getData(), block.getSize()))
+            return {};
+
+        return fileName.toStdString();
+    }
+
+    bool HeadlessProcessor::loadTrackerModuleFile(const std::string& entry, const bool addToRecent)
+    {
+        const auto file = trackerEntryFile(entry);
+        juce::MemoryBlock block;
+        if(!file.existsAsFile() || !file.loadFileAsData(block) || block.getSize() == 0)
+            return false;
+
+        const auto* raw = static_cast<const uint8_t*>(block.getData());
+        std::vector<uint8_t> data(raw, raw + block.getSize());
+        if(!loadTrackerModule(std::move(data), file.getFileName().toStdString()))
+            return false;
+
+        if(addToRecent)
+            addRecentTrackerModule(entry);
+        return true;
+    }
+
+    // ── Trackermeister playlist ─────────────────────────────────────────────
+
+    bool HeadlessProcessor::isTrackerPlaylistFile(const juce::File& file)
+    {
+        return file.hasFileExtension("m3u;m3u8");
+    }
+
+    std::vector<std::string> HeadlessProcessor::parseTrackerPlaylist(const juce::String& m3uText)
+    {
+        // The modules a playlist names have to be in the Tracker folder already: only the
+        // .m3u itself was picked, so the files next to it are out of reach on iOS.
+        std::vector<std::string> out;
+        const juce::File folder{juce::String(getTrackerFolder())};
+
+        juce::StringArray lines;
+        lines.addLines(m3uText);
+        for(const auto& raw : lines)
+        {
+            const auto line = raw.trim().replaceCharacter('\\', '/');
+            if(line.isEmpty() || line.startsWithChar('#'))
+                continue;
+
+            auto file = folder.getChildFile(line);
+            if(!file.existsAsFile())
+                file = folder.getChildFile(line.fromLastOccurrenceOf("/", false, false));
+            if(file.existsAsFile() && isTrackerModuleFile(file))
+                out.push_back(trackerEntryFor(file));
+        }
+        return out;
+    }
+
+    juce::String HeadlessProcessor::getTrackerPlaylistText() const
+    {
+        juce::String text("#EXTM3U\n");
+        for(const auto& entry : m_trackerPlaylist)
+            text << juce::String(entry) << "\n";
+        return text;
+    }
+
+    bool HeadlessProcessor::openTrackerPaths(const std::vector<std::string>& paths)
+    {
+        std::vector<std::string> list;
+
+        for(const auto& path : paths)
+        {
+            const auto file = trackerEntryFile(path);
+
+            if(file.isDirectory())
+            {
+                juce::Array<juce::File> found;
+                file.findChildFiles(found, juce::File::findFiles, true);
+                found.sort();
+                for(const auto& f : found)
+                    if(isTrackerModuleFile(f))
+                        list.push_back(trackerEntryFor(f));
+            }
+            else if(isTrackerPlaylistFile(file))
+            {
+                for(auto& entry : parseTrackerPlaylist(file.loadFileAsString()))
+                    list.push_back(std::move(entry));
+            }
+            else if(file.existsAsFile() && isTrackerModuleFile(file))
+                list.push_back(trackerEntryFor(file));
+        }
+
+        if(list.empty() || !getTrackerDevice() || m_renderActive.load())
+            return false;
+
+        const auto previous = m_trackerPlaylist;
+        const int previousIndex = m_trackerPlaylistIndex;
+
+        setTrackerPlaylist(std::move(list), 0);
+        if(loadTrackerPlaylistEntry(0, +1))
+        {
+            // stepping through a playlist later does not churn the recent list
+            addRecentTrackerModule(m_trackerPlaylist[static_cast<size_t>(m_trackerPlaylistIndex)]);
+            return true;
+        }
+
+        // nothing in there loads: what was playing stays
+        setTrackerPlaylist(std::vector<std::string>(previous), previousIndex);
+        return false;
+    }
+
+    void HeadlessProcessor::setTrackerPlaylist(std::vector<std::string>&& paths, const int index)
+    {
+        m_trackerPlaylist = std::move(paths);
+        m_trackerPlaylistIndex = m_trackerPlaylist.empty()
+            ? 0 : juce::jlimit(0, static_cast<int>(m_trackerPlaylist.size()) - 1, index);
+
+        if(auto* dev = getTrackerDevice())
+            dev->setStopAtEnd(isTrackerPlaylistMode());
+
+        if(isTrackerPlaylistMode())
+        {
+            if(!m_trackerPlaylistTimer)
+                m_trackerPlaylistTimer = std::make_unique<TrackerPlaylistTimer>(*this);
+            m_trackerPlaylistTimer->startTimerHz(20);
+        }
+        else if(m_trackerPlaylistTimer)
+            m_trackerPlaylistTimer->stopTimer();
+    }
+
+    bool HeadlessProcessor::loadTrackerPlaylistEntry(const int index, const int direction)
+    {
+        const int count = static_cast<int>(m_trackerPlaylist.size());
+        if(count == 0)
+            return false;
+
+        const int step = direction < 0 ? -1 : 1;
+        int i = ((index % count) + count) % count;
+
+        for(int tries = 0; tries < count; ++tries, i = (i + step + count) % count)
+        {
+            if(!loadTrackerModuleFile(m_trackerPlaylist[static_cast<size_t>(i)], false))
+                continue;
+            m_trackerPlaylistIndex = i;
+            return true;
+        }
+        return false;
+    }
+
+    bool HeadlessProcessor::playTrackerPlaylistIndex(const int index)
+    {
+        if(!loadTrackerPlaylistEntry(index, +1))
+            return false;
+        playTracker();
+        return true;
+    }
+
+    bool HeadlessProcessor::stepTrackerPlaylist(const int delta)
+    {
+        if(!isTrackerPlaylistMode() || !loadTrackerPlaylistEntry(m_trackerPlaylistIndex + delta, delta))
+            return false;
+        playTracker();
+        return true;
+    }
+
+    void HeadlessProcessor::openDocuments(const std::vector<juce::URL>& urls)
+    {
+        if(m_renderActive.load())
+            return;
+
+        // Modules win when a batch mixes both, as on the desktop.
+        std::vector<std::string> entries;
+        const juce::URL* midi = nullptr;
+        for(const auto& url : urls)
+        {
+            const auto name = juce::URL::removeEscapeChars(url.getFileName());
+            if(isTrackerModuleName(name))
+            {
+                auto entry = importTrackerFile(url);
+                if(!entry.empty())
+                    entries.push_back(std::move(entry));
+            }
+            else if(!midi && (name.endsWithIgnoreCase(".mid") || name.endsWithIgnoreCase(".midi")))
+                midi = &url;
+        }
+
+        if(entries.empty())
+        {
+            if(midi)
+                openMidiDocument(*midi);
+            return;
+        }
+
+        if(m_synthType != SynthType::Trackermeister)
+            setSynthType(SynthType::Trackermeister);
+
+        // Opened from Files, so it plays, unlike a pick in the app.
+        if(openTrackerPaths(entries))
+            playTracker();
+    }
+
+    void HeadlessProcessor::openTrackerDocument(const juce::URL& url)
+    {
+        openDocuments({url});
+    }
+
+    void HeadlessProcessor::openMidiDocument(const juce::URL& url)
+    {
+        if(m_renderActive.load())
+            return;
+
+        const juce::String fileName = juce::URL::removeEscapeChars(url.getFileName());
+        auto stream = url.createInputStream(
+            juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress));
+        if(fileName.isEmpty() || !stream)
+            return;
+
+        juce::MemoryBlock block;
+        stream->readIntoMemoryBlock(block);
+        if(block.getSize() == 0)
+            return;
+
+        // Without a complete ROM set there is no board to play it; the song is not lost,
+        // the copy below still lands in the recent list.
+        if(m_synthType != SynthType::Emu88 && isRomValid(SynthType::Emu88))
+            setSynthType(SynthType::Emu88);
+
+        const juce::File folder(juce::String(getSynthDataFolder(SynthType::Emu88)) + "MIDI/");
+        folder.createDirectory();
+        folder.getChildFile(fileName).replaceWithData(block.getData(), block.getSize());
+        addRecentMidiFile(fileName.toStdString());
+
+        if(m_synthType != SynthType::Emu88)
+            return;
+
+        const auto* raw = static_cast<const uint8_t*>(block.getData());
+        std::vector<uint8_t> data(raw, raw + block.getSize());
+        if(loadMidiFile(std::move(data), fileName.toStdString()))
+            playMidiFile();
+    }
+
+    void HeadlessProcessor::playTracker()
+    {
+        if(auto* dev = getTrackerDevice())
+            dev->play();
+    }
+
+    void HeadlessProcessor::stopTracker()
+    {
+        if(auto* dev = getTrackerDevice())
+            dev->stop();
+    }
+
+    bool HeadlessProcessor::hasTrackerHostTempo() const
+    {
+        const auto* dev = getTrackerDevice();
+        return dev && dev->hasSyncBpm();
+    }
+
+    bool HeadlessProcessor::isTrackerPlaying() const
+    {
+        const auto* dev = getTrackerDevice();
+        return dev && dev->isPlaying();
+    }
+
+    void HeadlessProcessor::setTrackerTempoSync(const bool enabled)
+    {
+        m_trackerTempoSync = enabled;
+        if(auto* dev = getTrackerDevice())
+            dev->setTempoSync(enabled);
+    }
+
+    bool HeadlessProcessor::startTrackerRender(const juce::URL& destUrl, const RenderFormat format)
+    {
+        if(!hasTrackerModule() || destUrl.isEmpty())
+            return false;
+        if(m_renderActive.exchange(true))
+            return false;   // one at a time
+
+        stopTracker();
+        m_renderCancel.store(false);
+        m_renderProgress.store(0.0f);
+
+        if(m_renderThread && m_renderThread->joinable())
+            m_renderThread->join();
+        m_renderThread = std::make_unique<std::thread>([this, destUrl, format]
+        {
+            renderTrackerToWav(destUrl, format);
+            m_renderActive.store(false);
+        });
+        return true;
+    }
+
+    namespace
+    {
+        constexpr double kTrackerRenderRate  = 48000.0;
+        constexpr int    kTrackerRenderBlock = 512;
+    }
+
+    bool HeadlessProcessor::beginTrackerRender()
+    {
+        auto* dev = getTrackerDevice();
+        if(!dev)
+            return false;
+
+        suspendProcessing(true);
+        // The player runs at any of the common rates, so 48 kHz is asked for directly
+        // and no resampler sits between the sinc interpolation and the file.
+        getPlugin().setHostSamplerate(static_cast<float>(kTrackerRenderRate), static_cast<float>(kTrackerRenderRate));
+        getPlugin().setBlockSize(kTrackerRenderBlock);
+
+        m_trackerRenderSync = dev->getTempoSync();
+        dev->setTempoSync(false);      // the file plays at the song's own tempo
+        dev->setOfflineRender(true);
+        return true;
+    }
+
+    void HeadlessProcessor::endTrackerRender()
+    {
+        m_renderProgress.store(1.0f);
+
+        if(auto* dev = getTrackerDevice())
+        {
+            dev->stop();
+            dev->setOfflineRender(false);
+            dev->setTempoSync(m_trackerRenderSync);
+        }
+        getPlugin().setHostSamplerate(static_cast<float>(getSampleRate()), 0.0f);
+        getPlugin().setBlockSize(static_cast<uint32_t>(getBlockSize()));
+        suspendProcessing(false);
+    }
+
+    void HeadlessProcessor::renderTrackerSong(const juce::URL& destUrl, const RenderFormat format,
+                                              const float progressStart, const float progressSpan)
+    {
+        constexpr int bitDepth = 24;
+        // A module that never reaches its end (a jump into an endless loop) stops here.
+        constexpr double maxSeconds = 30.0 * 60.0;
+
+        auto* dev = getTrackerDevice();
+        if(!dev)
+            return;
+
+        const juce::File dest = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                                    .getChildFile("retromulator_render.wav");
+        dest.deleteFile();
+
+        std::unique_ptr<juce::FileOutputStream> out(dest.createOutputStream());
+        if(!out)
+            return;
+
+        juce::WavAudioFormat wav;
+        std::unique_ptr<juce::AudioFormatWriter> writer(
+            wav.createWriterFor(out.get(), kTrackerRenderRate, 2, bitDepth, {}, 0));
+        if(!writer)
+            return;
+        out.release();   // the writer owns the stream from here
+
+        dev->playFromOrder(0);
+
+        juce::AudioBuffer<float> buffer(2, kTrackerRenderBlock);
+        std::vector<synthLib::SMidiEvent> midiOut;
+        const int orders = std::max(1, dev->getOrderCount());
+        double seconds = 0.0;
+
+        while(!m_renderCancel.load() && seconds < maxSeconds)
+        {
+            buffer.clear();
+            float* outs[2] = {buffer.getWritePointer(0), buffer.getWritePointer(1)};
+            const synthLib::TAudioInputs  ins{};
+            const synthLib::TAudioOutputs outputs{outs[0], outs[1]};
+            getPlugin().process(ins, outputs, kTrackerRenderBlock, 120.0f, 0.0f, false);
+            getPlugin().getMidiOut(midiOut);
+            midiOut.clear();
+
+            writer->writeFromAudioSampleBuffer(buffer, 0, kTrackerRenderBlock);
+            seconds += kTrackerRenderBlock / kTrackerRenderRate;
+
+            if(dev->hasEnded())
+                break;
+
+            const float done = (static_cast<float>(dev->getOrder()) + static_cast<float>(dev->getRow()) / 64.0f)
+                             / static_cast<float>(orders);
+            m_renderProgress.store(progressStart + progressSpan * juce::jlimit(0.0f, 1.0f, done));
+        }
+
+        writer.reset();   // flushes the header
+
+        deliverRender(dest, destUrl, format);
+    }
+
+    void HeadlessProcessor::renderTrackerToWav(const juce::URL& destUrl, const RenderFormat format)
+    {
+        if(!beginTrackerRender())
+            return;
+        renderTrackerSong(destUrl, format, 0.0f, 1.0f);
+        endTrackerRender();
+    }
+
+    void HeadlessProcessor::deliverRender(const juce::File& dest, const juce::URL& destUrl, const RenderFormat format)
+    {
+        // AAC is encoded from the finished WAV, so the emulation path is the same one
+        // for both formats and only the container differs.
+        juce::File source = dest;
+        if(!m_renderCancel.load() && format == RenderFormat::Aac)
+        {
+            const auto aac = dest.getSiblingFile("retromulator_render.m4a");
+            aac.deleteFile();
+            if(encodeWavToAac(dest.getFullPathName().toStdString(),
+                              aac.getFullPathName().toStdString(), kAacBitRate))
+            {
+                source = aac;
+                dest.deleteFile();
+            }
+        }
+
+        if(m_renderCancel.load())
+        {
+            dest.deleteFile();
+            return;
+        }
+
+        // Copy out to the picked location. The URL stream goes first: a chosen iOS
+        // location is security-scoped, and getLocalFile still hands back a path there
+        // that a plain copy cannot write to.
+        bool copied = false;
+        if(auto outStream = destUrl.createOutputStream())
+        {
+            juce::FileInputStream in(source);
+            if(in.openedOk())
+            {
+                copied = outStream->writeFromInputStream(in, -1) > 0;
+                outStream->flush();
+            }
+        }
+        if(!copied)
+        {
+            const auto destFile = destUrl.getLocalFile();
+            if(destFile.getFullPathName().isNotEmpty())
+            {
+                destFile.deleteFile();
+                copied = source.copyFileTo(destFile);
+            }
+        }
+        if(copied)
+            source.deleteFile();
     }
 
     void HeadlessProcessor::resetMidiModule(const uint32_t offset)
@@ -3253,6 +3910,41 @@ namespace retromulator
         return f.good() ? converted : -1;
     }
 
+    // ── Audio workgroup ──
+
+    namespace
+    {
+        // The workgroup the host renders on, published for the emulation worker threads. Those
+        // threads outlive any single call here, so the handle is kept at file scope and the token
+        // stays thread_local: it must be destroyed on the thread that joined with it.
+        std::mutex g_workgroupMutex;
+        juce::AudioWorkgroup g_audioWorkgroup;
+
+        void joinCallingThreadToAudioWorkgroup()
+        {
+            thread_local juce::WorkgroupToken token;
+
+            juce::AudioWorkgroup wg;
+            {
+                std::lock_guard lock(g_workgroupMutex);
+                wg = g_audioWorkgroup;
+            }
+
+            // join() is a no-op on a disengaged handle and re-joins cleanly if the host swapped it
+            wg.join(token);
+        }
+    }
+
+    void HeadlessProcessor::audioWorkgroupContextChanged(const juce::AudioWorkgroup& _workgroup)
+    {
+        {
+            std::lock_guard lock(g_workgroupMutex);
+            g_audioWorkgroup = _workgroup;
+        }
+
+        dsp56k::ThreadTools::setAudioWorkgroupJoiner(&joinCallingThreadToAudioWorkgroup);
+    }
+
     // ── Mirror incoming pitch bend / CC1 to atomics so the editor can animate wheels ──
 
     void HeadlessProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
@@ -3348,6 +4040,22 @@ namespace retromulator
             return;
         }
 
+        // The Tracker core has no notes to play: every key is transport. Handled here,
+        // as the 88emu keys are, so an on-screen key acts even when no audio block is
+        // pulling the MIDI queue. Playlist steps load a module, which belongs to this thread.
+        if(auto* dev = getTrackerDevice())
+        {
+            using trackerLib::Device;
+            if(midiNoteNumber == Device::kPlayNote)         dev->play();
+            else if(midiNoteNumber == Device::kStopNote)    dev->stop();
+            else if(midiNoteNumber == Device::kPrevNote)    stepTrackerPlaylist(-1);
+            else if(midiNoteNumber == Device::kNextNote)    stepTrackerPlaylist(+1);
+            else if(midiNoteNumber >= Device::kFirstPosNote
+                    && midiNoteNumber - Device::kFirstPosNote < dev->getOrderCount())
+                dev->playFromOrder(midiNoteNumber - Device::kFirstPosNote);
+            return;
+        }
+
         synthLib::SMidiEvent ev(synthLib::MidiEventSource::Editor);
         ev.a = static_cast<uint8_t>(0x90 | editorNoteChannel(midiChannel));
         ev.b = static_cast<uint8_t>(midiNoteNumber);
@@ -3362,6 +4070,9 @@ namespace retromulator
            && (midiNoteNumber == kMidiPlayNote || midiNoteNumber == kMidiStopNote))
             return;
 
+        if(getTrackerDevice())
+            return;
+
         synthLib::SMidiEvent ev(synthLib::MidiEventSource::Editor);
         ev.a = static_cast<uint8_t>(0x80 | editorNoteChannel(midiChannel));
         ev.b = static_cast<uint8_t>(midiNoteNumber);
@@ -3371,8 +4082,11 @@ namespace retromulator
 
     // ── processBpm (deferred resend: pre-audio guard + JE-8086 boot delay) ──────
 
-    void HeadlessProcessor::processBpm(float /*_bpm*/)
+    void HeadlessProcessor::processBpm(float _bpm)
     {
+        if(auto* dev = getTrackerDevice())
+            dev->setHostBpm(_bpm);
+
         // Resend the current bank message after the DSP is ready.
         // Two cases arm m_pendingResend:
         //   1. AU XPC: prepareToPlay not yet called when UI fires sendBankMessage.
@@ -3464,6 +4178,10 @@ namespace retromulator
     // 'E88D': the board itself. Written last so a session saved before it existed still
     // loads, and read back before the device is created so the boot picks the right one.
     static constexpr int32_t kEmu88BoardMagic = 0x44383845;
+    // "TRKM": the Trackermeister module (name, tempo sync, bytes).
+    static constexpr int32_t kTrackerMagic = 0x4D4B5254;
+    // "TRKP": the playlist that module came from (index, count, entries).
+    static constexpr int32_t kTrackerPlaylistMagic = 0x504B5254;
 
     void HeadlessProcessor::getStateInformation(juce::MemoryBlock& destData)
     {
@@ -3595,6 +4313,26 @@ namespace retromulator
         {
             appendInt32(destData, kEmu88BoardMagic);
             appendInt32(destData, static_cast<int32_t>(getEmu88Model()));
+        }
+
+        // Tracker module and the playlist it came from. The bytes travel with the session;
+        // the playlist is entry names only.
+        if(m_synthType == SynthType::Trackermeister)
+        {
+            appendInt32(destData, kTrackerMagic);
+            appendInt32(destData, static_cast<int32_t>(m_trackerFileName.size()));
+            if(!m_trackerFileName.empty())
+                destData.append(m_trackerFileName.data(), m_trackerFileName.size());
+            appendInt32(destData, m_trackerTempoSync ? 1 : 0);
+            appendInt32(destData, static_cast<int32_t>(m_trackerFileData.size()));
+            if(!m_trackerFileData.empty())
+                destData.append(m_trackerFileData.data(), m_trackerFileData.size());
+
+            appendInt32(destData, kTrackerPlaylistMagic);
+            appendInt32(destData, static_cast<int32_t>(m_trackerPlaylistIndex));
+            appendInt32(destData, static_cast<int32_t>(m_trackerPlaylist.size()));
+            for(const auto& path : m_trackerPlaylist)
+                appendString(destData, path);
         }
     }
 
@@ -3927,6 +4665,57 @@ namespace retromulator
         else
         {
             offset = midiStart;
+        }
+
+        // Restore the Trackermeister module (optional).
+        if(newType == SynthType::Trackermeister)
+        {
+            const int trackerStart = offset;
+            int32_t trackerMagic = 0, sync = 0;
+            std::string name;
+            std::vector<uint8_t> data;
+            if(readInt32(bytes, sizeInBytes, offset, trackerMagic) && trackerMagic == kTrackerMagic
+               && readString(bytes, sizeInBytes, offset, name)
+               && readInt32(bytes, sizeInBytes, offset, sync)
+               && readBytes(bytes, sizeInBytes, offset, data))
+            {
+                m_trackerTempoSync = sync != 0;
+                m_trackerFileName  = name;
+                m_trackerFileData  = std::move(data);
+            }
+            else
+            {
+                offset = trackerStart;
+                m_trackerFileName.clear();
+                m_trackerFileData.clear();
+            }
+
+            // The playlist is paths only: the loaded module above plays even if they are gone.
+            const int playlistStart = offset;
+            int32_t playlistMagic = 0, playlistIndex = 0, playlistCount = 0;
+            std::vector<std::string> playlist;
+            bool playlistOk = readInt32(bytes, sizeInBytes, offset, playlistMagic)
+                           && playlistMagic == kTrackerPlaylistMagic
+                           && readInt32(bytes, sizeInBytes, offset, playlistIndex)
+                           && readInt32(bytes, sizeInBytes, offset, playlistCount)
+                           && playlistCount >= 0;
+            for(int32_t i = 0; playlistOk && i < playlistCount; ++i)
+            {
+                std::string path;
+                playlistOk = readString(bytes, sizeInBytes, offset, path);
+                playlist.push_back(std::move(path));
+            }
+            if(!playlistOk)
+            {
+                offset = playlistStart;
+                playlist.clear();
+                playlistIndex = 0;
+            }
+            setTrackerPlaylist(std::move(playlist), playlistIndex);
+
+            if(auto* dev = getTrackerDevice())
+                dev->unloadModule();
+            reloadTrackerModule();
         }
     }
 }

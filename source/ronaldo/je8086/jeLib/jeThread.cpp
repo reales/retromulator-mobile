@@ -13,8 +13,9 @@ namespace jeLib
 
 	JeThread::~JeThread()
 	{
-		m_exit = true;
-		m_pendingJobs.push_back(ProcessJob());
+		m_exit.store(true, std::memory_order_release);
+		// a blocking push would deadlock here if the worker is already behind and the queue full
+		(void)m_pendingJobs.try_push_back(ProcessJob());
 		m_thread->join();
 		m_thread.reset();
 	}
@@ -29,6 +30,13 @@ namespace jeLib
 				job = std::move(m_jobPool.back());
 				m_jobPool.pop_back();
 			}
+		}
+
+		// MIDI held back when the queue was last full goes in front, still in order
+		if (!m_carriedMidi.empty())
+		{
+			job.midiEvents.insert(job.midiEvents.begin(), m_carriedMidi.begin(), m_carriedMidi.end());
+			m_carriedMidi.clear();
 		}
 
 		for (auto& e : _midiIn)
@@ -64,6 +72,22 @@ namespace jeLib
 			processJob(job);
 			m_jobPool.push_back(std::move(job));
 		}
+		else if (m_pendingJobs.full())
+		{
+			// the engine is not keeping up. Blocking here would stall the host's render graph and
+			// deepen the backlog that caused it. Carry the MIDI over to the next job, which would
+			// otherwise leave notes hanging, and drop only the sample request. The worker adds the
+			// dropped count to its sample offset so the carried events stay in time.
+			for (auto& e : job.midiEvents)
+				m_carriedMidi.emplace_back(std::move(e));
+			job.midiEvents.clear();
+
+			m_droppedSamples.fetch_add(job.samplesToProcess, std::memory_order_relaxed);
+			job.samplesToProcess = 0;
+
+			std::lock_guard lock(m_mutex);
+			m_jobPool.push_back(std::move(job));
+		}
 		else
 		{
 			m_pendingJobs.push_back(std::move(job));
@@ -88,12 +112,18 @@ namespace jeLib
 	{
 		dsp56k::ThreadTools::setCurrentThreadName("JE8086");
 		dsp56k::ThreadTools::setCurrentThreadPriority(dsp56k::ThreadPriority::Highest);
+		// must follow the RT policy above: Apple only admits realtime threads
+		dsp56k::ThreadTools::joinAudioWorkgroup();
 
-		while (!m_exit)
+		while (!m_exit.load(std::memory_order_acquire))
 		{
 			auto job = m_pendingJobs.pop_front();
 
-			if (m_exit)
+			// cheap no-op unless the host handed over a different workgroup; the thread may well
+			// have started before the host reported one at all
+			dsp56k::ThreadTools::joinAudioWorkgroup();
+
+			if (m_exit.load(std::memory_order_acquire))
 				break;
 
 			processJob(job);
@@ -105,6 +135,10 @@ namespace jeLib
 
 	void JeThread::processJob(ProcessJob& _job)
 	{
+		// samples the audio thread had to drop still advance time, or every carried event would
+		// fire late by the size of the backlog
+		m_processedSampleOffset += m_droppedSamples.exchange(0, std::memory_order_acq_rel);
+
 		if (m_tempMidiIn.empty())
 		{
 			std::swap(m_tempMidiIn, _job.midiEvents);
@@ -135,7 +169,9 @@ namespace jeLib
 			while (m_je8086.getSampleBuffer().empty())
 				m_je8086.step();
 
-			m_audioOut.push_back(m_je8086.getSampleBuffer().front());
+			// never block on a ring the audio thread may have stopped draining: that would hold
+			// the worker past m_exit and deadlock the join
+			(void)m_audioOut.try_push_back(m_je8086.getSampleBuffer().front());
 			m_je8086.clearSampleBuffer();
 
 			++m_processedSampleOffset;

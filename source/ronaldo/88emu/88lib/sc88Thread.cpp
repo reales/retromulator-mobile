@@ -107,9 +107,16 @@ namespace emu88Lib
 	{
 		dsp56k::ThreadTools::setCurrentThreadName("SC-88 family");
 		dsp56k::ThreadTools::setCurrentThreadPriority(dsp56k::ThreadPriority::Highest);
+		// must follow the RT policy above: Apple only admits realtime threads
+		dsp56k::ThreadTools::joinAudioWorkgroup();
 		while(!m_exit.load(std::memory_order_acquire))
 		{
 			auto job = m_pendingJobs.pop_front();
+
+			// cheap no-op unless the host handed over a different workgroup; the thread may well
+			// have started before the host reported one at all
+			dsp56k::ThreadTools::joinAudioWorkgroup();
+
 			if(m_exit.load(std::memory_order_acquire))
 				break;
 			processJob(job);

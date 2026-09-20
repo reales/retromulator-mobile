@@ -229,3 +229,158 @@ namespace retromulator
     }
 
 }
+
+
+// ── Documents handed over by Files, "Open in" and share sheets ───────────────
+// JUCE's delegates implement none of the open-URL callbacks, so they are grafted
+// on at load time rather than patching the module. With the UIScene lifecycle a
+// running app gets scene:openURLContexts:, and a cold launch gets the contexts in
+// the connection options of scene:willConnectToSession:options:.
+
+#import <UIKit/UIKit.h>
+#import <objc/runtime.h>
+
+namespace
+{
+    retromulator::HeadlessProcessor* g_documentTarget = nullptr;
+    NSMutableArray<NSString*>* g_pendingDocuments = nil;   // message thread only
+
+    // A multi-select share arrives one file at a time, so arrivals are gathered until
+    // they stop and then opened as one batch: several modules make a playlist.
+    int g_flushGeneration = 0;
+
+    void flushDocuments()
+    {
+        if(g_documentTarget == nullptr || g_pendingDocuments == nil || g_pendingDocuments.count == 0)
+            return;
+
+        NSArray<NSString*>* pending = [g_pendingDocuments copy];
+        [g_pendingDocuments removeAllObjects];
+
+        std::vector<juce::URL> urls;
+        for(NSString* path in pending)
+            urls.push_back(juce::URL(juce::File(juce::String::fromUTF8([path UTF8String]))));
+
+        g_documentTarget->openDocuments(urls);
+
+        // what is kept was copied in, so the temp files are done with
+        for(NSString* path in pending)
+            [[NSFileManager defaultManager] removeItemAtPath: path error: nil];
+        [pending release];
+    }
+
+    void deliverDocument(NSString* path)
+    {
+        if(g_pendingDocuments == nil)
+            g_pendingDocuments = [[NSMutableArray alloc] init];
+        [g_pendingDocuments addObject: path];
+
+        const int generation = ++g_flushGeneration;
+        juce::Timer::callAfterDelay(400, [generation]
+        {
+            if(generation == g_flushGeneration)
+                flushDocuments();
+        });
+    }
+
+    // The file is opened in place, outside the sandbox: it is copied to a temp file
+    // under scoped access, off the main thread since an iCloud item may need a download.
+    void handleIncomingURL(NSURL* url)
+    {
+        if(url == nil || ![url isFileURL])
+            return;
+
+        NSURL* copy = [url copy];
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^
+        {
+            const BOOL scoped = [copy startAccessingSecurityScopedResource];
+
+            NSString* dest = [NSTemporaryDirectory() stringByAppendingPathComponent: [copy lastPathComponent]];
+            __block BOOL ok = NO;
+            NSFileCoordinator* coord = [[NSFileCoordinator alloc] initWithFilePresenter: nil];
+            [coord coordinateReadingItemAtURL: copy options: 0 error: nil byAccessor: ^(NSURL* readable)
+            {
+                NSFileManager* fm = [NSFileManager defaultManager];
+                [fm removeItemAtPath: dest error: nil];
+                ok = [fm copyItemAtURL: readable toURL: [NSURL fileURLWithPath: dest] error: nil];
+            }];
+            [coord release];
+
+            if(scoped)
+                [copy stopAccessingSecurityScopedResource];
+            [copy release];
+
+            if(!ok)
+                return;
+
+            NSString* path = [dest copy];
+            juce::MessageManager::callAsync([path]
+            {
+                deliverDocument(path);
+                [path release];
+            });
+        });
+    }
+
+    BOOL retroApplicationOpenURL(id, SEL, UIApplication*, NSURL* url, NSDictionary*)
+    {
+        handleIncomingURL(url);
+        return YES;
+    }
+
+    void retroSceneOpenURLContexts(id, SEL, UIScene*, NSSet<UIOpenURLContext*>* contexts)
+    {
+        for(UIOpenURLContext* context in contexts)
+            handleIncomingURL(context.URL);
+    }
+
+    IMP g_originalWillConnect = nullptr;
+
+    void retroSceneWillConnect(id self, SEL cmd, UIScene* scene, UISceneSession* session,
+                               UISceneConnectionOptions* options)
+    {
+        if(g_originalWillConnect != nullptr)
+            ((void (*)(id, SEL, UIScene*, UISceneSession*, UISceneConnectionOptions*)) g_originalWillConnect)
+                (self, cmd, scene, session, options);
+
+        for(UIOpenURLContext* context in options.URLContexts)
+            handleIncomingURL(context.URL);
+    }
+}
+
+namespace retromulator
+{
+    void HeadlessProcessor::setIOSDocumentTarget(HeadlessProcessor* target)
+    {
+        g_documentTarget = target;
+        if(target == nullptr || g_pendingDocuments == nil)
+            return;
+
+        // The core switch needs a finished constructor, so the queue drains afterwards.
+        juce::MessageManager::callAsync([] { flushDocuments(); });
+    }
+}
+
+@interface RetromulatorOpenURLInstaller : NSObject
+@end
+
+@implementation RetromulatorOpenURLInstaller
+
+// The JUCE delegate classes are registered by the runtime before any +load runs.
++ (void) load
+{
+    if(Class c = objc_getClass("JuceAppStartupDelegate"))
+        class_addMethod(c, @selector(application:openURL:options:),
+                        (IMP) retroApplicationOpenURL, "B@:@@@");
+
+    if(Class c = objc_getClass("JuceAppSceneDelegate"))
+    {
+        class_addMethod(c, @selector(scene:openURLContexts:),
+                        (IMP) retroSceneOpenURLContexts, "v@:@@");
+
+        if(Method m = class_getInstanceMethod(c, @selector(scene:willConnectToSession:options:)))
+            g_originalWillConnect = method_setImplementation(m, (IMP) retroSceneWillConnect);
+    }
+}
+
+@end

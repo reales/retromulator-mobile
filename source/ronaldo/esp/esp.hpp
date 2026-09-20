@@ -8,6 +8,16 @@
 
 template <int32_t N> static constexpr int32_t se(int32_t x) { x <<= (32 - N); return x >> (32 - N); }
 
+// Upstream diagnostics for unexpected ESP opcodes. They sit inside the per-instruction
+// step() loop, which the interpreter runs on the audio thread, so they are off unless
+// explicitly enabled for debugging.
+#if defined(ESP_TRACE_UNEXPECTED)
+#	define ESP_DIAG(...) printf(__VA_ARGS__)
+#else
+#	define ESP_DIAG(...) ((void)0)
+#endif
+
+
 template<int lg2eram_size>
 class ESP;
 
@@ -61,7 +71,7 @@ public:
 			eramPCStartNext = pc;
 			eramImmOffsetAccNext = 0;
 			stage1 = 0;
-			if (eramModeNext & 0x7) printf("wtf %03x at pc=%04x\n", eramCtrl, pc);
+			if (eramModeNext & 0x7) ESP_DIAG("wtf %03x at pc=%04x\n", eramCtrl, pc);
 		}
 
 		// Accumulate immediates
@@ -78,7 +88,7 @@ public:
 
 		// Next stage
 		if (eramActiveNext && stage1 == 5) { // FIXME: stage1 should be 4, but there are some problems with latching
-			if (eramActiveCurrent) printf("ERAM transaction already active at pc %03x\n", pc);
+			if (eramActiveCurrent) ESP_DIAG("ERAM transaction already active at pc %03x\n", pc);
 			eramActiveCurrent = true;
 			eramModeCurrent = eramModeNext;
 			eramPCCommit = eramPCStartNext + ERAM_COMMIT_STAGE;
@@ -213,8 +223,8 @@ public:
 				shift = (shiftbits & 1) ? 6 : 7;
 				mulInputA_24 = shared->gram[mempos];
 				break;
-			case 0x28: printf("Unexpected Opcode 0x28. This should be unused\n"); break;
-			case 0x2c: printf("Unexpected Opcode 0x2c. This should be unused\n"); break;
+			case 0x28: ESP_DIAG("Unexpected Opcode 0x28. This should be unused\n"); break;
+			case 0x2c: ESP_DIAG("Unexpected Opcode 0x2c. This should be unused\n"); break;
 			case 0x30:
 			{
 				acc = (coef & 2);
@@ -236,7 +246,7 @@ public:
 			}
 				break;
 			case 0x34:
-				if (mem < 0xa0 || (mem & 0xf0) == 0xb0) printf("Unexpected value for mem (%02x) with opcode 0x34\n", mem);
+				if (mem < 0xa0 || (mem & 0xf0) == 0xb0) ESP_DIAG("Unexpected value for mem (%02x) with opcode 0x34\n", mem);
 				if (mem >= 0xa0 && mem < 0xb0) shared->mulcoeffs[(mem >> 1) & 7] = ((mem & 1) ? accB : accA).getPipelineSat24();
 				if (mem >= 0xc0)
 				{
@@ -266,7 +276,7 @@ public:
 							writeIRAM(mulInputA_24, mem | 0xf0);
 							break;
 						default:
-							printf("Unknown value for mem (%02x) with opcode 0x34\n", mem);
+							ESP_DIAG("Unknown value for mem (%02x) with opcode 0x34\n", mem);
 							break;
 					}
 				}
@@ -285,7 +295,7 @@ public:
 				clr = true;
 				setcondition = true;
 				break;
-			case 0x54: printf("Mysterious opcode 54 at pc = %04x\n", pc - 1); break; // TODO: what is this?
+			case 0x54: ESP_DIAG("Mysterious opcode 54 at pc = %04x\n", pc - 1); break; // TODO: what is this?
 			case 0x58: iram[mempos] = mulInputA_24 = accA.getPipelineSat24(); break;
 			case 0x5c: acc = true; iram[mempos] = mulInputA_24 = accB.getPipelineSat24(); break;
 			
@@ -317,7 +327,7 @@ public:
 				clr = true;
 				break;
 			
-			default: printf("mysterious\n"); break; // TODO: few more opcodes here
+			default: ESP_DIAG("mysterious\n"); break; // TODO: few more opcodes here
 		}
 		
 		if (skipfield & 1) mulInputA_24 = 0;
@@ -339,7 +349,7 @@ public:
 	}
 protected:
 	static constexpr int64_t PRAM_SIZE = 768, IRAM_SIZE = 0x100, IRAM_MASK = IRAM_SIZE - 1;
-	void jumpto(uint16_t newpc) { if (pcjumpat != -1) printf("Oh no! Jump overlap!\n"); pcjumpto = newpc; pcjumpat = pc + 2;}
+	void jumpto(uint16_t newpc) { if (pcjumpat != -1) ESP_DIAG("Oh no! Jump overlap!\n"); pcjumpto = newpc; pcjumpat = pc + 2;}
 
 	int32_t iram[IRAM_SIZE] {}, last_mulInputA_24 {0}, last_mulInputB_24 {0}, skipfield {0};
 	bool lastMul30 = false;

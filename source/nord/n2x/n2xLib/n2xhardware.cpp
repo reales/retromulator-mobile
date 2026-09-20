@@ -446,6 +446,8 @@ namespace n2x
 	{
 		dsp56k::ThreadTools::setCurrentThreadName("MC68331");
 		dsp56k::ThreadTools::setCurrentThreadPriority(dsp56k::ThreadPriority::Highest);
+		// must follow the RT policy above: Apple only admits realtime threads
+		dsp56k::ThreadTools::joinAudioWorkgroup();
 
 		while(!m_destroy)
 		{

@@ -39,7 +39,9 @@ namespace jeLib
 
 		std::unique_ptr<std::thread> m_thread;
 
-		bool m_exit = false;
+		std::atomic<bool> m_exit = false;
+
+		std::atomic<uint64_t> m_droppedSamples = 0;
 
 		uint32_t m_currentLatency = 0;
 
@@ -57,5 +59,6 @@ namespace jeLib
 		uint64_t m_processedSampleOffset = 0;
 		std::vector<synthLib::SMidiEvent> m_tempMidiOut;
 		std::vector<MidiEvent> m_tempMidiIn;
+		std::vector<MidiEvent> m_carriedMidi;
 	};
 }
