@@ -55,14 +55,19 @@ locally to build:
   render ahead of the host, so they set a realtime policy and then join the
   host's audio workgroup. Without that the performance controller does not
   count them as audio work.
-- A MIDI file player is built in: load a `.mid` file and play it through the
-  current core.
+- A MIDI file player is built in: load a `.mid` file, or a playlist of them,
+  and play it through the current core.
 - The Tracker core loads `.xm`, `.mod`, `.s3m` and `.it` modules, with
   playlists and `.m3u` support. A pick on iOS is security-scoped, so modules
   are copied into the Tracker folder and only the name is kept.
 - Modules and `.mid` files can be opened from Files or a share sheet: the app
   declares the document types and switches to the matching core.
-- Playback can be rendered offline to WAV or AAC.
+- Playback can be rendered offline to WAV or AAC, one song or a whole playlist.
+- The standalone app saves its state when iOS suspends it, since a backgrounded
+  app can be killed without a quit call.
+- The standalone declares a `LongFormAudio` route sharing policy for AirPlay
+  output. The audio session side of it is a local JUCE patch, not part of this
+  repo.
 
 ## Hardware Cores
 
@@ -102,7 +107,7 @@ The **Roland JP-8000 (JE-8086)** runs the original firmware on an H8S CPU core w
 
 The **AY-3-8910 / YM2149** emulates the 3-channel PSG used in the ZX Spectrum, Amstrad CPC, MSX, and Atari ST using the Ayumi engine, with a voice layer re-implementing the Ym2149Synth firmware: soft volume and pitch envelopes, glide, vibrato, detune, noise delay, and transpose. Voices are controlled via CC 1–11 and patches are stored in a user bank.
 
-The **Tracker** core plays tracker modules: XM and MOD through the FastTracker 2 replayer, S3M and IT through the Schism Tracker player with Nuked OPL3 for Adlib instruments. It has a transport driven by MIDI notes (play, stop, previous, next, and start at an order), playlists built from folders or `.m3u` files, and tempo sync that scales the song so its initial BPM lands on the host tempo. MOD files play with the Amiga L-R-R-L hard panning, plus a BassMX stage that moves the side signal below 150 Hz to the centre and scales the rest by a stereo width control.
+The **Tracker** core plays tracker modules: XM and MOD through the FastTracker 2 replayer, S3M and IT through the Schism Tracker player with Nuked OPL3 for Adlib instruments. It has a transport driven by MIDI notes (play, stop, previous, next, and start at an order), playlists built from folders or `.m3u` files, and tempo sync that scales the song so its initial BPM lands on the host tempo. A playlist can be shuffled or stop at its end, and a song ends after five seconds of silence. MOD files play with the Amiga L-R-R-L hard panning, plus a BassMX stage that moves the side signal below 150 Hz to the centre and scales the rest by a stereo width control.
 
 ## How it differs from Gearmulator
 

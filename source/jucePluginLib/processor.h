@@ -233,5 +233,8 @@ namespace pluginLib
 		std::chrono::steady_clock::time_point m_lastCallbackTime{};
 		std::atomic<uint32_t> m_audioUnderrunCount{0};
 		uint32_t m_callbackWarmup = 10;  // skip first 10 callbacks after boot/swap
+		// Buffered routes (AirPlay, Bluetooth) deliver callbacks in bursts, so a
+		// single late one is not a dropout. Only report a run of consecutive ones.
+		uint32_t m_lateCallbackRun = 0;
 	};
 }

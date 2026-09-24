@@ -1,6 +1,7 @@
 #pragma once
 
 #include "SynthType.h"
+#include "PlaylistOrder.h"
 #include "jucePluginLib/processor.h"
 #include "synthLib/midiTypes.h"
 #ifndef CUSTOM
@@ -151,6 +152,8 @@ namespace retromulator
         // middle C (60) is C4, so these are C1 and D1.
         static constexpr int kMidiPlayNote = 24;
         static constexpr int kMidiStopNote = 26;
+        static constexpr int kMidiPrevNote = 25;   // C#1, playlist
+        static constexpr int kMidiNextNote = 27;   // D#1, playlist
 
         // Parse and keep a MIDI file. The bytes are held so the song survives in the
         // plugin state; .mid files are small enough to travel with the session.
@@ -164,6 +167,30 @@ namespace retromulator
         static void addRecentMidiFile(const std::string& fileName);
         bool loadRecentMidiFile(const std::string& fileName);
 
+        // Playlist: names in the MIDI folder, kept in the plugin state. More than one
+        // entry is playlist mode: a song that ends starts the next one, and C#1 and D#1
+        // step through it. append adds after the current entries and keeps the song
+        // loaded. Nothing starts playing; false if no entry could be loaded.
+        static bool isMidiFileName(const juce::String& fileName);
+        // Copies a picked URL into the MIDI folder. Returns the entry, empty on failure.
+        static std::string importMidiFile(const juce::URL& url);
+        bool openMidiEntries(const std::vector<std::string>& entries, bool append = false);
+        void clearMidiPlaylist();
+        const std::vector<std::string>& getMidiPlaylist() const { return m_midiPlaylist; }
+        int  getMidiPlaylistIndex() const { return m_midiPlaylistIndex; }
+        bool isMidiPlaylistMode() const { return m_midiPlaylist.size() > 1; }
+        // Loads that entry and plays it. Entries that do not load are skipped forward.
+        bool playMidiPlaylistIndex(int index);
+        bool stepMidiPlaylist(int delta);
+        // .m3u text to entries: only songs already in the MIDI folder resolve.
+        static std::vector<std::string> parseMidiPlaylist(const juce::String& m3uText);
+        juce::String getMidiPlaylistText() const;
+        // Same meaning and storage as the tracker's options, kept apart from them.
+        bool getMidiShuffle() const { return m_midiShuffle; }
+        void setMidiShuffle(bool enabled);
+        bool getMidiStopAtEnd() const { return m_midiStopAtEnd; }
+        void setMidiStopAtEnd(bool enabled);
+
         // ── Offline render ──────────────────────────────────────────────────
         // Renders the loaded song on a background thread, 48 kHz stereo: WAV at 24 bit
         // or AAC at 256 kbps. Live audio is suspended for the duration: there is one
@@ -173,6 +200,10 @@ namespace retromulator
         // cannot be written to directly.
         enum class RenderFormat : uint8_t { Wav, Aac };
         bool startMidiRender(const juce::URL& destUrl, RenderFormat format);
+        // Every playlist entry, named "01 song.wav" in playlist order. The sink gets each
+        // finished file on the render thread and copies it to wherever the user picked.
+        using RenderSink = std::function<bool(const juce::File& rendered, const juce::String& fileName)>;
+        bool startMidiPlaylistRender(RenderSink sink, RenderFormat format);
         void cancelMidiRender();
         bool isMidiRendering() const { return m_renderActive.load(); }
         // 0..1, for the editor's progress display.
@@ -207,7 +238,8 @@ namespace retromulator
         bool loadTrackerModuleFile(const std::string& entry, bool addToRecent = true);
 
         // Playlist: entries, kept in the plugin state. More than one is playlist mode,
-        // where a song stops at its end and the next one starts, wrapping around. Folders
+        // where a song stops at its end and the next one starts, wrapping around unless
+        // Stop at Playlist End is on. Folders
         // are scanned for modules and .m3u/.m3u8 files are expanded. Nothing starts
         // playing; false if no entry could be loaded.
         bool openTrackerPaths(const std::vector<std::string>& entries);
@@ -233,6 +265,13 @@ namespace retromulator
         // Scales the song so its initial BPM lands on the host tempo.
         bool getTrackerTempoSync() const { return m_trackerTempoSync; }
         void setTrackerTempoSync(bool enabled);
+        // Off: a single song loops and a playlist wraps around. On: both stop at the end.
+        // The last choice is the default for new instances, the plugin state keeps its own.
+        bool getTrackerStopAtEnd() const { return m_trackerStopAtEnd; }
+        void setTrackerStopAtEnd(bool enabled);
+        // Previous, next and the end of a song follow a shuffled order. Saved like Stop at End.
+        bool getTrackerShuffle() const { return m_trackerShuffle; }
+        void setTrackerShuffle(bool enabled);
         // Same thread, progress and cancel as the MIDI render. 256 tap sinc, song end stops it.
         bool startTrackerRender(const juce::URL& destUrl, RenderFormat format);
 
@@ -510,6 +549,11 @@ namespace retromulator
         std::atomic<bool>  m_renderCancel{false};
         std::atomic<float> m_renderProgress{0.0f};
         void renderMidiToWav(const juce::URL& destUrl, RenderFormat format);
+        void renderMidiPlaylist(const RenderSink& sink, RenderFormat format);
+        void renderMidiSong(const std::vector<MidiSongEvent>& events, const juce::URL& destUrl, RenderFormat format,
+                            float progressStart, float progressSpan);
+        void beginMidiRender();
+        void endMidiRender();
         void renderTrackerToWav(const juce::URL& destUrl, RenderFormat format);
         // One song of a render. The caller brackets it with begin/endTrackerRender.
         void renderTrackerSong(const juce::URL& destUrl, RenderFormat format, float progressStart, float progressSpan);
@@ -522,17 +566,37 @@ namespace retromulator
         std::vector<uint8_t> m_trackerFileData;
         std::string          m_trackerFileName;
         bool                 m_trackerTempoSync = false;
+        bool                 m_trackerStopAtEnd = false;
+        bool                 m_trackerShuffle = false;
+        void applyTrackerStopAtEnd();
         // Set by openTrackerDocument: the module starts once the core has booted.
         std::atomic<bool>    m_trackerPlayAfterLoad{false};
         void reloadTrackerModule();
 
         std::vector<std::string> m_trackerPlaylist;
         int                      m_trackerPlaylistIndex = 0;
+        PlaylistOrder            m_trackerOrder;
+        // index < 0: the first entry of the play order, random when shuffled.
         void setTrackerPlaylist(std::vector<std::string>&& paths, int index);
-        bool loadTrackerPlaylistEntry(int index, int direction);
+        // A position in the play order. Entries that fail to load are skipped in direction.
+        bool loadTrackerPlaylistPosition(int position, int direction);
         // Message thread: moves on when the device reports a finished song.
-        struct TrackerPlaylistTimer;
-        std::unique_ptr<TrackerPlaylistTimer> m_trackerPlaylistTimer;
+        std::vector<std::string> m_midiPlaylist;
+        int                      m_midiPlaylistIndex = 0;
+        PlaylistOrder            m_midiOrder;
+        bool                     m_midiShuffle = false;
+        bool                     m_midiStopAtEnd = false;
+        std::atomic<bool>        m_midiPlaylistActive{false};   // read by the audio thread
+        std::atomic<bool>        m_midiSongFinished{false};
+        std::atomic<int>         m_midiPlaylistStep{0};
+        void setMidiPlaylist(std::vector<std::string>&& entries, int index);
+        bool loadMidiPlaylistPosition(int position, int direction);
+
+        // Message thread: moves either playlist on when its song ends or a note asks.
+        struct PlaylistTimer;
+        std::unique_ptr<PlaylistTimer> m_playlistTimer;
+        void onPlaylistTimer();
+        void updatePlaylistTimer();
         // AAC has no JUCE encoder: CoreAudioFormat is read-only. The rendered WAV is
         // converted by AVFoundation. Implemented in HeadlessProcessor_ios.mm.
         static bool encodeWavToAac(const std::string& wavPath, const std::string& aacPath,

@@ -644,6 +644,7 @@ namespace pluginLib
 					// Huge gap (>10x) = boot/swap pause, not a real underrun.
 					// Reset warmup to ignore the next few callbacks.
 					m_callbackWarmup = 10;
+					m_lateCallbackRun = 0;
 				}
 				else if (m_callbackWarmup > 0)
 				{
@@ -651,7 +652,15 @@ namespace pluginLib
 				}
 				else if (elapsedUs > expectedUs * 2)
 				{
-					m_audioUnderrunCount.fetch_add(1, std::memory_order_relaxed);
+					if (++m_lateCallbackRun >= 4)
+					{
+						m_audioUnderrunCount.fetch_add(1, std::memory_order_relaxed);
+						m_lateCallbackRun = 0;
+					}
+				}
+				else
+				{
+					m_lateCallbackRun = 0;
 				}
 			}
 			m_lastCallbackTime = now;
