@@ -997,13 +997,16 @@ namespace retromulator
 
         suspendProcessing(true);
 
+        std::unique_ptr<synthLib::Device> oldDevice;
         if(type == SynthType::None)
         {
             // Swap in a silent DummyDevice directly — rebootDevice() would show an
             // error dialog when createDevice() throws for None, leaving the old device running.
+            // The old device is deleted off this thread: a DSP core joins its thread and hangs here.
+            getPlugin().releaseDevice();
+            oldDevice.reset(m_device.release());
             auto* dummy = new pluginLib::DummyDevice({});
             getPlugin().setDevice(dummy);
-            (void)m_device.release();
             m_device.reset(dummy);
         }
         else
@@ -1058,6 +1061,10 @@ namespace retromulator
         setLatencyBlocks(isSynchronous ? 0 : (isN2X ? 1 : 3));
 
         suspendProcessing(false);
+
+        if(oldDevice)
+            std::thread([dev = std::move(oldDevice)]() mutable { dev.reset(); }).detach();
+
         updateHostDisplay(juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged(true));
     }
 
