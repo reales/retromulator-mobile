@@ -4,6 +4,7 @@
 #include "jucePluginLib/processor.h"
 #include "nord/n2x/n2xLib/n2xmiditypes.h"
 #include "ronaldo/je8086/jeLib/state.h"
+#include "matrixLib/patch.h"
 #include "synthLib/midiTypes.h"
 
 #include <algorithm>
@@ -189,6 +190,7 @@ namespace retromulator
         case SynthType::Ayumi:     return "ayumi";
         case SynthType::Emu88:     return "emu88";
         case SynthType::Trackermeister: return "tracker";
+        case SynthType::Matrix:    return "matrix";
         default:                   return "generic";
         }
     }
@@ -395,6 +397,19 @@ namespace retromulator
         const bool fromOutside = ev.source == synthLib::MidiEventSource::Host
                               || ev.source == synthLib::MidiEventSource::Physical;
         auto* s = m_slots[static_cast<size_t>(slot)];
+
+        // The Matrix firmware ignores these CCs: spread 0-127 over the parameter's range
+        // and send it as a remote parameter edit
+        const auto& b = s->binding();
+        if(map->type == SynthType::Matrix && b.native >= 0 && b.desc)
+        {
+            const int lo = b.desc->range.getStart();
+            const int v = lo + ev.c * (b.desc->range.getEnd() - lo + 1) / 128;
+            s->setFromMidi(v, fromOutside);
+            sendSlot(*s, b, v);
+            return true;
+        }
+
         const bool isSwitch = status == synthLib::M_CONTROLCHANGE && isSwitchSlot(s->binding());
         s->setFromMidi(isSwitch ? (ev.c >= 64 ? 1 : 0) : ev.c, fromOutside);
         return true;
@@ -434,6 +449,15 @@ namespace retromulator
             {
                 sendEmu88Native(b.native, value);
                 return;
+            }
+            else if(map && map->type == SynthType::Matrix)
+            {
+                // remote parameter edit; signed parameters sit around the middle of the slot
+                int v = value;
+                if(b.desc && b.desc->isBipolar)
+                    v -= static_cast<int>(b.range.end) / 2;
+                const auto msg = matrixLib::patch::createParamChange(static_cast<uint8_t>(b.native), v);
+                ev.sysex.assign(msg.begin(), msg.end());
             }
             else if(map && map->type == SynthType::JE8086)
             {
@@ -720,6 +744,25 @@ namespace retromulator
                     continue;
                 for(size_t i = 0; i < vced.size(); ++i)
                     setNative(static_cast<int>(i), vced[i]);
+                continue;
+            }
+
+            if(map->type == SynthType::Matrix)
+            {
+                const auto data = matrixLib::patch::decode(m.data(), m.size());
+                if(!data)
+                    continue;
+                for(size_t i = 0; i < static_cast<size_t>(NumSlots); ++i)
+                {
+                    const auto& b = map->bindings[i];
+                    if(!b.desc || b.native < 0)
+                        continue;
+                    if(const auto* p = matrixLib::patch::findParam(static_cast<uint8_t>(b.native)))
+                    {
+                        const int v = matrixLib::patch::getParamValue(*data, *p);
+                        values[i] = b.desc->isBipolar ? v - p->min : v;
+                    }
+                }
                 continue;
             }
 
