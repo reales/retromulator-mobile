@@ -284,6 +284,9 @@ namespace retromulator
         // Previous, next and the end of a song follow a shuffled order. Saved like Stop at End.
         bool getTrackerShuffle() const { return m_trackerShuffle; }
         void setTrackerShuffle(bool enabled);
+        // On: a position key jumps when the playing pattern ends. Saved like Stop at End.
+        bool getTrackerWaitPatternEnd() const { return m_trackerWaitPatternEnd; }
+        void setTrackerWaitPatternEnd(bool enabled);
         // Same thread, progress and cancel as the MIDI render. 256 tap sinc, song end stops it.
         bool startTrackerRender(const juce::URL& destUrl, RenderFormat format);
 
@@ -582,6 +585,7 @@ namespace retromulator
         void applyMatrixLfoSync();
         bool                 m_trackerStopAtEnd = false;
         bool                 m_trackerShuffle = false;
+        bool                 m_trackerWaitPatternEnd = true;
         void applyTrackerStopAtEnd();
         // Set by openTrackerDocument: the module starts once the core has booted.
         std::atomic<bool>    m_trackerPlayAfterLoad{false};
@@ -605,6 +609,18 @@ namespace retromulator
         std::atomic<int>         m_midiPlaylistStep{0};
         void setMidiPlaylist(std::vector<std::string>&& entries, int index);
         bool loadMidiPlaylistPosition(int position, int direction);
+
+        // Matrix: CC0/CC32 pick the bank file (sorted like the bank combo), a program change
+        // then loads it and the program on the message thread. Encoded (bank + 1) << 8 | program.
+        std::atomic<int> m_matrixBankSelect{-1};
+        std::atomic<int> m_matrixPendingProgram{-1};
+        void filterMatrixProgramChanges(juce::MidiBuffer& midi);
+        void applyMatrixProgramChange();
+        // Tracker: the F0/G0 keys moved a loop point, the host parameters follow.
+        void syncTrackerLoopParams();
+        // Audio thread MIDI that has to be handled on the message thread.
+        struct CoreAsync;
+        std::unique_ptr<CoreAsync> m_coreAsync;
 
         // Message thread: moves either playlist on when its song ends or a note asks.
         struct PlaylistTimer;

@@ -5,9 +5,11 @@
 #include "nord/n2x/n2xLib/n2xmiditypes.h"
 #include "ronaldo/je8086/jeLib/state.h"
 #include "matrixLib/patch.h"
+#include "trackerLib/device.h"
 #include "synthLib/midiTypes.h"
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <sstream>
 
@@ -354,6 +356,159 @@ namespace retromulator
         return *slot;
     }
 
+    juce::String ParameterPool::getCcTableText(const SynthType type, const bool grid)
+    {
+        const auto& map = mapFor(type);
+
+        std::vector<std::pair<int, juce::String>> ccs, pps;
+        for(const auto& b : map.bindings)
+        {
+            if(!b.desc)
+                continue;
+            if(b.cc >= 0)
+                ccs.emplace_back(b.cc, juce::String(b.desc->displayName));
+            if(b.pp >= 0)
+                pps.emplace_back(b.pp, juce::String(b.desc->displayName));
+        }
+
+        // handled by the plugin, not the parameter map
+        if(type == SynthType::Matrix)
+        {
+            ccs.emplace_back(0, "Bank Select (bank file)");
+            ccs.emplace_back(32, "Bank Select (bank file)");
+        }
+
+        const auto byNumber = [](const auto& a, const auto& b) { return a.first < b.first; };
+        std::stable_sort(ccs.begin(), ccs.end(), byNumber);
+        std::stable_sort(pps.begin(), pps.end(), byNumber);
+
+        juce::String out;
+        if(ccs.empty() && pps.empty())
+            return "No MIDI CCs mapped.\n";
+
+        // grid without tab columns (iOS centres alert text): "7 Volume", no padding
+        const auto plainSection = [grid](const std::vector<std::pair<int, juce::String>>& rows)
+        {
+            juce::String s;
+            for(const auto& [n, name] : rows)
+                s << (grid ? juce::String(n) : juce::String(n).paddedLeft(' ', 3)) << (grid ? " " : "  ") << name << "\n";
+            return s;
+        };
+
+#if JUCE_MAC
+        // NSAlert shows the message in SF 13 pt with tab stops every 28 pt up to 336 pt. Its
+        // text is 408 pt wide from 15 lines on, 220 pt below, so columns need 15 lines.
+        const juce::Font sf(juce::FontOptions().withName(".AppleSystemUIFont").withPointHeight(13.0f));
+        const auto widthOf = [&sf](const juce::String& t) { return juce::GlyphArrangement::getStringWidth(sf, t); };
+        // another font would put the tabs at the wrong stops
+        const bool haveSf = std::abs(widthOf("7 Volume") - 55.87f) < 2.0f;
+
+        const auto fit = [&widthOf](juce::String t, const float maxWidth)
+        {
+            if(widthOf(t) <= maxWidth)
+                return t;
+            const juce::String dots = juce::String::charToString(0x2026);
+            while(t.isNotEmpty() && widthOf(t + dots) > maxWidth)
+                t = t.dropLastCharacters(1);
+            return t.trimEnd() + dots;
+        };
+
+        // tabs from a name ending at x to the stop at column start
+        const auto tabsTo = [](float x, const float stop)
+        {
+            juce::String t;
+            while(x < stop - 0.5f)
+            {
+                x = (std::floor(x / 28.0f) + 1.0f) * 28.0f;
+                t << "\t";
+            }
+            return t;
+        };
+
+        const auto gridSection = [&](const juce::String& heading, const std::vector<std::pair<int, juce::String>>& rows, const int cols)
+        {
+            const float colStart[3] = {0.0f, cols == 3 ? 140.0f : 224.0f, 280.0f};
+            const float colEnd[3] = {cols == 1 ? 220.0f : colStart[1], cols == 3 ? 280.0f : 408.0f, 408.0f};
+            constexpr float numWidth = 28.0f;
+            constexpr float gap = 8.0f;
+
+            const int count = static_cast<int>(rows.size());
+            const int lines = (count + cols - 1) / cols;
+
+            const auto cell = [&](const juce::String& num, const juce::String& name, const int c, const bool last)
+            {
+                auto shown = fit(name, colEnd[c] - colStart[c] - numWidth - gap);
+                float x = colStart[c] + numWidth + widthOf(shown);
+                // a name ending within a hair of a stop may land either side of it, so a
+                // space moves it clearly past
+                const float intoStop = std::fmod(x, 28.0f);
+                if(intoStop > 26.0f || intoStop < 1.0f)
+                {
+                    shown << " ";
+                    x += widthOf(" ");
+                }
+                juce::String t = num + "\t" + shown;
+                if(!last)
+                    t << tabsTo(x, colStart[c + 1]);
+                return t;
+            };
+
+            juce::String s;
+            if(heading.isNotEmpty())
+                s << heading << "\n";
+            for(int r = 0; r < lines; ++r)
+            {
+                for(int c = 0; c < cols; ++c)
+                {
+                    const int i = c * lines + r;
+                    if(i >= count)
+                        break;
+                    const bool last = c + 1 == cols || i + lines >= count;
+                    s << cell(juce::String(rows[static_cast<size_t>(i)].first), rows[static_cast<size_t>(i)].second, c, last);
+                }
+                s << "\n";
+            }
+            return s;
+        };
+
+        if(grid && haveSf)
+        {
+            const auto build = [&](const int cols)
+            {
+                juce::String t;
+                if(!ccs.empty())
+                    t << gridSection({}, ccs, cols);
+                if(!pps.empty())
+                    t << (t.isEmpty() ? "" : "\n") << gridSection("Poly Pressure", pps, cols);
+                return t;
+            };
+            const auto lineCount = [](const juce::String& t) { return juce::StringArray::fromLines(t).size(); };
+            // the widest layout that still reaches the 408 pt box
+            for(int cols = 3; cols >= 1; --cols)
+            {
+                out = build(cols);
+                if(lineCount(out) >= 16)
+                    break;
+            }
+        }
+        else
+#endif
+        {
+            if(!ccs.empty())
+                out << (grid ? "" : "CC   Parameter\n") << plainSection(ccs);
+            if(!pps.empty())
+                out << (out.isEmpty() ? "" : "\n") << (grid ? "Poly Pressure\n" : "PP   Parameter (poly pressure)\n") << plainSection(pps);
+        }
+
+        if(type == SynthType::Matrix)
+            out << "\nProgram Change 0-99 picks the patch of the bank file.\n";
+        if(type == SynthType::Trackermeister)
+            out << "\nKeys F0 and G0 set Loop In and Loop Out to the playing order.\n";
+        if(map.perPart)
+            out << "\nCCs apply to the part on their MIDI channel.\n";
+        return out;
+    }
+
     void ParameterPool::refreshFor(const SynthType type)
     {
         const auto idx = static_cast<size_t>(static_cast<int>(type) + 1);
@@ -399,12 +554,16 @@ namespace retromulator
         auto* s = m_slots[static_cast<size_t>(slot)];
 
         // The Matrix firmware ignores these CCs: spread 0-127 over the parameter's range
-        // and send it as a remote parameter edit
+        // and send it as a remote parameter edit. Same for the tracker's loop points.
         const auto& b = s->binding();
-        if(map->type == SynthType::Matrix && b.native >= 0 && b.desc)
+        if((map->type == SynthType::Matrix || map->type == SynthType::Trackermeister) && b.native >= 0 && b.desc)
         {
             const int lo = b.desc->range.getStart();
-            const int v = lo + ev.c * (b.desc->range.getEnd() - lo + 1) / 128;
+            const int span = b.desc->range.getEnd() - lo;
+            // a loop point has 129 values, so 127 has to reach the top one
+            const int v = map->type == SynthType::Trackermeister
+                ? lo + (ev.c * span + 63) / 127
+                : lo + ev.c * (span + 1) / 128;
             s->setFromMidi(v, fromOutside);
             sendSlot(*s, b, v);
             return true;
@@ -457,6 +616,12 @@ namespace retromulator
                 if(b.desc && b.desc->isBipolar)
                     v -= static_cast<int>(b.range.end) / 2;
                 const auto msg = matrixLib::patch::createParamChange(static_cast<uint8_t>(b.native), v);
+                ev.sysex.assign(msg.begin(), msg.end());
+            }
+            else if(map && map->type == SynthType::Trackermeister)
+            {
+                // loop points reach 128, past a 7 bit value
+                const auto msg = trackerLib::Device::createLoopMessage(b.native, midiValue);
                 ev.sysex.assign(msg.begin(), msg.end());
             }
             else if(map && map->type == SynthType::JE8086)

@@ -22,6 +22,8 @@ namespace trackerLib
 		static constexpr int kPrevNote      = 13;	// playlist: the owner loads the module
 		static constexpr int kStopNote      = 14;
 		static constexpr int kNextNote      = 15;
+		static constexpr int kLoopInNote    = 17;	// F0: loop from the playing order
+		static constexpr int kLoopOutNote   = 19;	// G0: loop back after the playing order
 		static constexpr int kFirstPosNote  = 24;	// note 24 + n starts at order n
 		static constexpr int kMeterColumns  = 16;
 		static constexpr int kMaxChannels   = 64;
@@ -54,6 +56,8 @@ namespace trackerLib
 		// Any thread; the audio thread picks the request up.
 		void play();						// from the top, also while playing
 		void playFromOrder(int _order);
+		// Like a position note: waits for the pattern end when that option is on.
+		void jumpToOrder(int _order);
 		void stop();
 		// A request the audio thread has not picked up yet already counts.
 		bool isPlaying() const;
@@ -77,9 +81,21 @@ namespace trackerLib
 		// Playlist: a live song stops at its end too, and says so once. So does a song that
 		// has been silent for kSilenceSeconds after making sound, when it would stop at its end.
 		void setStopAtEnd(bool _enabled)	{ m_stopAtEnd = _enabled; }
+		// On: a position note while playing jumps when the playing pattern ends, not at once.
+		void setWaitPatternEnd(bool _enabled)	{ m_waitPatternEnd = _enabled; }
 		bool consumeSongFinished()			{ return m_songFinished.exchange(false); }
 		// Previous / next notes since the last call: -1, +1 or 0.
 		int consumePlaylistStep()			{ return m_playlistStep.exchange(0); }
+
+		// Loop points, 0 = off, n = order n - 1. Active while both are set and In <= Out: the
+		// end of the Out order goes back to the In order.
+		static constexpr int kLoopIn  = 1;
+		static constexpr int kLoopOut = 2;
+		static constexpr int kLoopMax = 128;
+		void setLoopPoint(int _which, int _value);
+		int getLoopPoint(int _which) const	{ return (_which == kLoopOut ? m_loopOut : m_loopIn).load(); }
+		// F0 7D 4C which hi lo F7: sets a loop point from the parameters, value = hi << 7 | lo.
+		static std::vector<uint8_t> createLoopMessage(int _which, int _value);
 
 		int getOrder() const		{ return m_order.load(); }
 		int getRow() const			{ return m_row.load(); }
@@ -99,9 +115,12 @@ namespace trackerLib
 		{
 			uint32_t offset;
 			int order;		// >= 0 start there, -2 stop
+			bool fromNote = false;
 		};
 
 		void applyCommand(const Command& _c);
+		int nextOrder() const;
+		bool parseLoopMessage(const std::vector<uint8_t>& _sysex);
 		void applyTempo();
 		void onMidiClock(uint32_t _offset);
 		void updateMeters(size_t _samples);
@@ -130,6 +149,7 @@ namespace trackerLib
 
 		static constexpr int kNoRequest = -100;
 		std::atomic<int> m_request{kNoRequest};
+		std::atomic<int> m_jumpRequest{kNoRequest};
 
 		std::atomic<bool> m_hasModule{false};
 		std::atomic<bool> m_playing{false};
@@ -138,6 +158,10 @@ namespace trackerLib
 		std::atomic<float> m_gain{1.0f};	// CC 7
 		std::atomic<bool> m_songFinished{false};
 		std::atomic<int> m_playlistStep{0};
+		std::atomic<bool> m_waitPatternEnd{true};
+		int m_pendingJump = -1;		// audio thread: order a position note queued
+		std::atomic<int> m_loopIn{0};
+		std::atomic<int> m_loopOut{0};
 		std::atomic<bool> m_tempoSync{false};
 		std::atomic<float> m_stereoWidth{0.7f};
 		std::atomic<float> m_hostBpm{0.0f};

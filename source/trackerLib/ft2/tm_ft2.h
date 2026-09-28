@@ -23,6 +23,9 @@ void tmFt2SetTempoScale(double scale);
 void tmFt2Play(int order, bool stopAtEnd);
 void tmFt2Stop(void);
 void tmFt2Render(float *interleavedStereo, uint32_t frames);
+// The next pattern end goes to this order instead of the following one, -1 = off.
+void tmFt2SetNextOrder(int order);
+bool tmFt2HasNextOrder(void);
 
 bool tmFt2HasEnded(void);
 int tmFt2GetOrder(void);

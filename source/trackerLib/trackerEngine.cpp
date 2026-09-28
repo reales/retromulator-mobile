@@ -188,6 +188,8 @@ namespace trackerLib
 			void play(const int _order, const bool _stopAtEnd) override { tmFt2Play(_order, _stopAtEnd); }
 			void stop() override								{ tmFt2Stop(); }
 			void render(float* _out, const uint32_t _frames) override { tmFt2Render(_out, _frames); }
+			void setNextOrder(const int _order) override			{ tmFt2SetNextOrder(_order); }
+			bool hasNextOrder() const override					{ return tmFt2HasNextOrder(); }
 
 			bool hasEnded() const override			{ return tmFt2HasEnded(); }
 			int getOrder() const override			{ return tmFt2GetOrder(); }
@@ -217,6 +219,8 @@ namespace trackerLib
 			void play(const int _order, const bool _stopAtEnd) override { tmSchismPlay(m_song, _order, _stopAtEnd); }
 			void stop() override								{ tmSchismStop(m_song); }
 			void render(float* _out, const uint32_t _frames) override { tmSchismRender(m_song, _out, _frames); }
+			void setNextOrder(const int _order) override			{ tmSchismSetNextOrder(m_song, _order); }
+			bool hasNextOrder() const override					{ return tmSchismHasNextOrder(m_song); }
 
 			bool hasEnded() const override			{ return tmSchismHasEnded(m_song); }
 			int getOrder() const override			{ return tmSchismGetOrder(m_song); }

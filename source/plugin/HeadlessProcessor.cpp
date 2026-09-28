@@ -844,6 +844,94 @@ namespace retromulator
         }
     }
 
+    struct HeadlessProcessor::CoreAsync final : juce::AsyncUpdater
+    {
+        explicit CoreAsync(HeadlessProcessor& p) : proc(p) {}
+        ~CoreAsync() override { cancelPendingUpdate(); }
+
+        void handleAsyncUpdate() override
+        {
+            proc.applyMatrixProgramChange();
+            proc.syncTrackerLoopParams();
+        }
+
+        HeadlessProcessor& proc;
+    };
+
+    // Audio thread. The firmware never sees these: its own bank switch would race the
+    // edit buffer the plugin sends for the loaded bank file.
+    void HeadlessProcessor::filterMatrixProgramChanges(juce::MidiBuffer& midi)
+    {
+        bool changed = false;
+        juce::MidiBuffer kept;
+        for(const auto meta : midi)
+        {
+            const auto m = meta.getMessage();
+            if(m.isController() && (m.getControllerNumber() == 0 || m.getControllerNumber() == 32))
+            {
+                m_matrixBankSelect.store(m.getControllerValue());
+                continue;
+            }
+            if(m.isProgramChange())
+            {
+                m_matrixPendingProgram.store(((m_matrixBankSelect.load() + 1) << 8) | m.getProgramChangeNumber());
+                changed = true;
+                continue;
+            }
+            kept.addEvent(m, meta.samplePosition);
+        }
+        if(kept.getNumEvents() == midi.getNumEvents())
+            return;
+        midi.swapWith(kept);
+        if(changed && m_coreAsync)
+            m_coreAsync->triggerAsyncUpdate();
+    }
+
+    void HeadlessProcessor::applyMatrixProgramChange()
+    {
+        const int pending = m_matrixPendingProgram.exchange(-1);
+        if(pending < 0 || m_synthType != SynthType::Matrix || m_renderActive.load())
+            return;
+
+        const int bank = (pending >> 8) - 1;
+        const int program = pending & 0x7f;
+
+        if(bank >= 0)
+        {
+            juce::Array<juce::File> files;
+            juce::File(getSynthDataFolder(SynthType::Matrix)).findChildFiles(files, juce::File::findFiles, false,
+                                                                              "*.syx;*.mid;*.bin;*.pfm");
+            files.sort();
+            if(bank >= files.size())
+                return;
+            const auto& f = files.getReference(bank);
+            if(f.getFullPathName().toStdString() != m_sysexFilePath)
+            {
+                loadPresetFromFile(f.getFullPathName().toStdString(), f.getFileNameWithoutExtension().toStdString(), program);
+                return;
+            }
+        }
+
+        // No bank file loaded: the firmware plays its own patch memory
+        if(getProgramCount() == 0)
+        {
+            getPlugin().addMidiEvent(synthLib::SMidiEvent(synthLib::MidiEventSource::Editor,
+                synthLib::M_PROGRAMCHANGE, static_cast<uint8_t>(program), 0));
+            return;
+        }
+        if(program < getProgramCount() && program != m_currentProgram)
+            selectProgram(program);
+    }
+
+    void HeadlessProcessor::syncTrackerLoopParams()
+    {
+        auto* dev = getTrackerDevice();
+        if(!dev || !m_paramPool)
+            return;
+        for(const int which : {trackerLib::Device::kLoopIn, trackerLib::Device::kLoopOut})
+            m_paramPool->setNativeSlotValue(which, dev->getLoopPoint(which), true, false);
+    }
+
     void HeadlessProcessor::updatePlaylistTimer()
     {
         if(isTrackerPlaylistMode() || isMidiPlaylistMode())
@@ -925,8 +1013,10 @@ namespace retromulator
         loadEditorSizeFromSettings();
         m_trackerStopAtEnd = readSettingsBool("trackerStopAtEnd", false);
         m_trackerShuffle   = readSettingsBool("trackerShuffle", false);
+        m_trackerWaitPatternEnd = readSettingsBool("trackerWaitPatternEnd", true);
         m_midiStopAtEnd    = readSettingsBool("midiStopAtEnd", false);
         m_midiShuffle      = readSettingsBool("midiShuffle", false);
+        m_coreAsync = std::make_unique<CoreAsync>(*this);
 
         m_keyboardState.addListener(this);
 
@@ -944,6 +1034,7 @@ namespace retromulator
        #endif
 
         m_playlistTimer.reset();
+        m_coreAsync.reset();
 
         // Must join before any member is destroyed: ~thread on a joinable
         // thread calls std::terminate.
@@ -3611,11 +3702,21 @@ namespace retromulator
         m_trackerOrder.reset(static_cast<int>(m_trackerPlaylist.size()), m_trackerPlaylistIndex, enabled);
     }
 
+    void HeadlessProcessor::setTrackerWaitPatternEnd(const bool enabled)
+    {
+        m_trackerWaitPatternEnd = enabled;
+        writeSettingsBool("trackerWaitPatternEnd", enabled);
+        applyTrackerStopAtEnd();
+    }
+
     // A playlist always stops its songs at their end, the timer decides what comes next.
     void HeadlessProcessor::applyTrackerStopAtEnd()
     {
         if(auto* dev = getTrackerDevice())
+        {
             dev->setStopAtEnd(isTrackerPlaylistMode() || m_trackerStopAtEnd);
+            dev->setWaitPatternEnd(m_trackerWaitPatternEnd);
+        }
     }
 
     void HeadlessProcessor::setTrackerTempoSync(const bool enabled)
@@ -4419,7 +4520,25 @@ namespace retromulator
             processDemoSequence(static_cast<uint32_t>(buffer.getNumSamples()), getSampleRate());
             processMidiFile(static_cast<uint32_t>(buffer.getNumSamples()), getSampleRate());
         }
+        else if(m_synthType == SynthType::Matrix)
+            filterMatrixProgramChanges(midi);
+
+        bool trackerLoopKey = false;
+        if(m_synthType == SynthType::Trackermeister)
+        {
+            for(const auto meta : midi)
+            {
+                const auto m = meta.getMessage();
+                if(m.isNoteOn() && (m.getNoteNumber() == trackerLib::Device::kLoopInNote
+                                    || m.getNoteNumber() == trackerLib::Device::kLoopOutNote))
+                    trackerLoopKey = true;
+            }
+        }
+
         Processor::processBlock(buffer, midi);
+
+        if(trackerLoopKey && m_coreAsync)
+            m_coreAsync->triggerAsyncUpdate();
     }
 
     // ── Virtual keyboard listener — routes on-screen key presses to the synth ───
@@ -4462,9 +4581,15 @@ namespace retromulator
             else if(midiNoteNumber == Device::kStopNote)    dev->stop();
             else if(midiNoteNumber == Device::kPrevNote)    stepTrackerPlaylist(-1);
             else if(midiNoteNumber == Device::kNextNote)    stepTrackerPlaylist(+1);
+            else if(midiNoteNumber == Device::kLoopInNote || midiNoteNumber == Device::kLoopOutNote)
+            {
+                dev->setLoopPoint(midiNoteNumber == Device::kLoopInNote ? Device::kLoopIn : Device::kLoopOut,
+                                  dev->getOrder() + 1);
+                syncTrackerLoopParams();
+            }
             else if(midiNoteNumber >= Device::kFirstPosNote
                     && midiNoteNumber - Device::kFirstPosNote < dev->getOrderCount())
-                dev->playFromOrder(midiNoteNumber - Device::kFirstPosNote);
+                dev->jumpToOrder(midiNoteNumber - Device::kFirstPosNote);
             return;
         }
 
@@ -4769,7 +4894,9 @@ namespace retromulator
                 appendString(destData, path);
 
             appendInt32(destData, kTrackerOptionsMagic);
-            appendInt32(destData, (m_trackerStopAtEnd ? 1 : 0) | (m_trackerShuffle ? 2 : 0));
+            // 4 is "jump at once", so sessions from before the option keep waiting
+            appendInt32(destData, (m_trackerStopAtEnd ? 1 : 0) | (m_trackerShuffle ? 2 : 0)
+                                  | (m_trackerWaitPatternEnd ? 0 : 4));
         }
 
         // ['MXLS':int32][lfo1 division:int32][lfo2 division:int32], last so the tail read finds it
@@ -5215,6 +5342,7 @@ namespace retromulator
             {
                 m_trackerStopAtEnd = (options & 1) != 0;
                 m_trackerShuffle   = (options & 2) != 0;
+                m_trackerWaitPatternEnd = (options & 4) == 0;
             }
             else
                 offset = optionsStart;
