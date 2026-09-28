@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<JUCERPROJECT id="mMahW2" name="Retromulator" projectType="audioplug" version="1.7.3"
+<JUCERPROJECT id="mMahW2" name="Retromulator" projectType="audioplug" version="1.8.1"
               juceLinkage="amalg_multi" useGlobalAppConfig="1" pluginName="Retromulator"
               pluginDesc="Multi-synth DSP56300 emulator" pluginManufacturer="discoDSP"
               pluginManufacturerCode="DDSP" pluginCode="RtMU" pluginIsSynth="1"
@@ -90,6 +90,7 @@
       <FILE id="f0009" name="BasicEditor.h" compile="0" resource="0" file="source/plugin/BasicEditor.h"/>
       <FILE id="f0010" name="BasicEditor.cpp" compile="1" resource="0" file="source/plugin/BasicEditor.cpp"/>
       <FILE id="f0011" name="ParameterPool.h" compile="0" resource="0" file="source/plugin/ParameterPool.h"/>
+      <FILE id="cct001" name="CcTable.h" compile="0" resource="0" file="source/plugin/CcTable.h"/>
       <FILE id="f0012" name="ParameterPool.cpp" compile="1" resource="0" file="source/plugin/ParameterPool.cpp"/>
       <FILE id="f0013" name="Emu88ToneTable.h" compile="0" resource="0" file="source/plugin/Emu88ToneTable.h"/>
       <FILE id="f0014" name="Emu88ToneTable.cpp" compile="1" resource="0" file="source/plugin/Emu88ToneTable.cpp"/>
